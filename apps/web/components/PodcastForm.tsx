@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Loader2, PlusCircle, CheckCircle } from "lucide-react";
+import toast from "react-hot-toast";
 
 export default function PodcastForm() {
   const [title, setTitle] = useState("");
@@ -29,6 +30,7 @@ export default function PodcastForm() {
       }
 
       setSuccessId(data.id);
+      toast.success("Podcast successfully added to the processing queue!");
       setTitle("");
       setSourceUrl("");
       
@@ -38,7 +40,7 @@ export default function PodcastForm() {
       }, 1500);
       
     } catch (err: any) {
-      setError(err.message || "An unexpected error occurred.");
+      toast.error(err.message || "An unexpected error occurred.");
     } finally {
       setLoading(false);
     }

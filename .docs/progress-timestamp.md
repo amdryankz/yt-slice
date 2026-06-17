@@ -350,5 +350,24 @@ Upgrade the frontend user experience from a completely static page to a highly r
 
 #### 4. React EventSource Connection (`PodcastDetailClient.tsx`)
 - Intercepted the static React architecture and injected a `useEffect` hook to open an `EventSource` connection to the SSE stream.
-- When the `REFRESH_CLIPS` payload is caught, React silently fetches the updated database records via a new `GET /api/podcasts/[id]/clips` handler.
 - The UI progress bars and video states now update seemingly by magic the precise millisecond the worker finishes its job!
+
+---
+
+## Progress Report: Global Error & Toast Notifications
+
+### Objective
+Enhance user feedback across the application by replacing ugly, blocking browser `alert()` popups with elegant, animated, and non-blocking toast notifications.
+
+### Completed Tasks
+
+#### 1. Integration of `react-hot-toast`
+- Installed `react-hot-toast` into the frontend web application.
+- Injected the `<Toaster />` provider into the global `RootLayout` (`apps/web/app/layout.tsx`), configured with custom styling (dark mode background, border accents, top-center positioning) to match the existing premium UI aesthetic.
+
+#### 2. Component Refactoring & UX Upgrades
+- **`PodcastForm.tsx`**: Replaced standard text errors with `toast.error()`. Replaced silent reloads with a satisfying `toast.success('Podcast successfully added!')` when a YouTube link is submitted.
+- **`PodcastDetailClient.tsx`**: Removed all native `alert()` calls. Added success toasts when manually adding a clip or deleting the podcast.
+- **`ClipCard.tsx`**: 
+  - Added toasts for saving text edits, copying captions, deleting clips, and initiating the "Cut Video" FFmpeg process.
+  - **Crucial Refactor**: Discovered and completely eliminated a lingering, redundant polling `setInterval` block inside the card component! The card now perfectly syncs via `useEffect` with the parent SSE data stream, achieving 100% true real-time reactivity without any polling overhead.

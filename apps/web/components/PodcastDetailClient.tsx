@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import ReactPlayer from "react-player";
 import Link from "next/link";
 import { ArrowLeft, Trash2, Loader2 } from "lucide-react";
+import toast from "react-hot-toast";
 import ClipCard from "./ClipCard";
 
 export default function PodcastDetailClient({ podcast, generatedClips }: { podcast: any, generatedClips: any[] }) {
@@ -64,10 +65,11 @@ export default function PodcastDetailClient({ podcast, generatedClips }: { podca
     try {
       const res = await fetch(`/api/podcasts/${podcast.id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to delete podcast');
+      toast.success('Podcast dihapus!');
       window.location.href = '/';
     } catch (error) {
       console.error(error);
-      alert('Gagal menghapus podcast');
+      toast.error('Gagal menghapus podcast');
       setIsDeletingPodcast(false);
     }
   }
@@ -89,6 +91,7 @@ export default function PodcastDetailClient({ podcast, generatedClips }: { podca
       
       // Append new clip to the end of the list
       setLocalClips((prev) => [...prev, data.clip]);
+      toast.success('Klip manual ditambahkan!');
       
       // Scroll smoothly to bottom to see new clip
       setTimeout(() => {
@@ -96,7 +99,7 @@ export default function PodcastDetailClient({ podcast, generatedClips }: { podca
       }, 100);
     } catch (error) {
       console.error(error);
-      alert('Gagal menambahkan klip manual');
+      toast.error('Gagal menambahkan klip manual');
     } finally {
       setIsAdding(false);
     }

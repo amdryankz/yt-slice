@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Flame, Edit2, Download, Copy, Check, Loader2, Play, MousePointer2, Trash2 } from "lucide-react";
+import toast from "react-hot-toast";
 
 function formatTime(seconds: number) {
   const m = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -24,34 +25,13 @@ export default function ClipCard({ clip: initialClip, index, playerRef, playedSe
   const [editEndTime, setEditEndTime] = useState(initialClip.endTime);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Polling mechanism
+  // Sync with parent SSE updates
   useEffect(() => {
-    let intervalId: ReturnType<typeof setInterval>;
-
-    if (localClip.status === 'processing') {
-      intervalId = setInterval(async () => {
-        try {
-          const res = await fetch(`/api/clips/${localClip.id}`);
-          if (res.ok) {
-            const data = await res.json();
-            const fetchedClip = data.clip;
-            
-            if (fetchedClip.status === 'completed' || fetchedClip.status === 'failed') {
-              setLocalClip(fetchedClip);
-              setIsCutting(false);
-              clearInterval(intervalId);
-            }
-          }
-        } catch (error) {
-          console.error("Failed to poll clip status:", error);
-        }
-      }, 3000);
+    setLocalClip(initialClip);
+    if (initialClip.status === 'completed' || initialClip.status === 'failed') {
+      setIsCutting(false);
     }
-
-    return () => {
-      if (intervalId) clearInterval(intervalId);
-    };
-  }, [localClip.status, localClip.id]);
+  }, [initialClip]);
 
   async function handleCut() {
     setIsCutting(true);
@@ -74,8 +54,10 @@ export default function ClipCard({ clip: initialClip, index, playerRef, playedSe
       if (!res.ok) {
         throw new Error('Failed to trigger cut');
       }
+      toast.success('Proses pemotongan video dimulai!');
     } catch (err) {
       console.error(err);
+      toast.error('Gagal memproses klip');
       setLocalClip((prev: any) => ({ ...prev, status: 'failed' }));
       setIsCutting(false);
     }
@@ -84,6 +66,7 @@ export default function ClipCard({ clip: initialClip, index, playerRef, playedSe
   async function handleCopyCaption() {
     await navigator.clipboard.writeText(localClip.caption);
     setCopied(true);
+    toast.success('Caption disalin ke clipboard');
     setTimeout(() => setCopied(false), 2000);
   }
 
@@ -98,9 +81,10 @@ export default function ClipCard({ clip: initialClip, index, playerRef, playedSe
       const data = await res.json();
       setLocalClip(data.clip);
       setIsEditing(false);
+      toast.success('Perubahan disimpan!');
     } catch (err) {
       console.error(err);
-      alert('Gagal menyimpan perubahan');
+      toast.error('Gagal menyimpan perubahan');
     }
   }
 
@@ -110,10 +94,11 @@ export default function ClipCard({ clip: initialClip, index, playerRef, playedSe
     try {
       const res = await fetch(`/api/clips/${localClip.id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to delete');
+      toast.success('Klip berhasil dihapus');
       if (onDelete) onDelete(localClip.id);
     } catch (error) {
       console.error(error);
-      alert('Gagal menghapus klip');
+      toast.error('Gagal menghapus klip');
       setIsDeleting(false);
     }
   }

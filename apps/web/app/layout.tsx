@@ -11,6 +11,8 @@ const fontMono = Geist_Mono({
   variable: "--font-mono",
 })
 
+import { Toaster } from "react-hot-toast";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -23,7 +25,20 @@ export default function RootLayout({
       className={cn("antialiased", fontMono.variable, "font-sans", inter.variable)}
     >
       <body>
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          {children}
+          <Toaster 
+            position="top-center" 
+            toastOptions={{
+              duration: 4000,
+              style: {
+                background: '#1e293b',
+                color: '#fff',
+                border: '1px solid rgba(255,255,255,0.1)'
+              }
+            }} 
+          />
+        </ThemeProvider>
       </body>
     </html>
   )

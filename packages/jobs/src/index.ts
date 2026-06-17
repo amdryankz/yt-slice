@@ -11,4 +11,6 @@ export interface CutClipJobPayload {
   watermarkText?: string;
 }
 
-export type AnyJobPayload = VideoJobPayload | CutClipJobPayload;
+export interface CleanupJobPayload {}
+
+export type AnyJobPayload = VideoJobPayload | CutClipJobPayload | CleanupJobPayload;

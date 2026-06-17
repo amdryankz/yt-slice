@@ -301,3 +301,27 @@ Migrate the storage backend for rendered `.mp4` video clips from the local files
 - When an entity is erased, the backend now intelligently parses the absolute `http` S3 URL, constructs a `DeleteObjectCommand`, and fires it to Cloudflare to permanently prune the physical cloud asset, perfectly preventing orphaned files and saving bucket space.
 
 The application is now 100% production-ready for massive scale video hosting!
+
+---
+
+## Progress Report: Auto-Cleanup Cron Job
+
+### Objective
+Prevent the server disk and database from silently inflating over time due to orphaned temporary files (caused by abrupt server/worker crashes) or ancient, unrendered clip drafts.
+
+### Completed Tasks
+
+#### 1. BullMQ Cron Scheduling
+- Registered a `cleanup-temp-files` payload in the job typings.
+- Instructed the `Worker` to proactively inject a self-sustaining **Repeatable Job** upon initialization.
+- Configured the Cron pattern `0 3 * * *` to execute automatically every day at 03:00 AM.
+
+#### 2. Local Disk Janitor
+- During execution, the job scans the OS `/tmp/clip-ai` directory.
+- It parses the modified timestamps (`mtimeMs`) of all working folders.
+- Any temporary artifact older than **24 hours** is ruthlessly deleted (`fs.rm` with recursive/force flags).
+
+#### 3. Database Pruning
+- Integrated a Drizzle ORM query utilizing `lt` (less than), `or`, and `and` operators.
+- Deletes any `clips` row where the status is explicitly stuck in `draft` or `failed` AND the `createdAt` timestamp is older than **7 days**.
+- Leaves `completed` clips intact, ensuring successful S3 videos remain accessible indefinitely.

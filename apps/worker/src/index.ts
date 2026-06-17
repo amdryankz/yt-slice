@@ -3,9 +3,9 @@ import fs from 'fs/promises';
 import os from 'os';
 import path, { join } from 'path';
 import { Worker, Job } from 'bullmq';
-import { connection, type AnyJobPayload, type VideoJobPayload, type CutClipJobPayload } from '@workspace/jobs';
+import { connection, videoQueue, type AnyJobPayload, type VideoJobPayload, type CutClipJobPayload } from '@workspace/jobs';
 import { db, podcasts, clips } from '@workspace/db';
-import { eq } from 'drizzle-orm';
+import { eq, lt, or, and } from 'drizzle-orm';
 import { downloadAudio, getAudioDuration } from './lib/downloader';
 import { transcribeAudio } from './lib/transcriber';
 import { analyzeTranscript } from './lib/gemini';
@@ -133,6 +133,44 @@ const worker = new Worker(
           .where(eq(clips.id, clipId));
         throw error;
       }
+    } else if (job.name === 'cleanup-temp-files') {
+      console.log(`[Job ${job.id}] Running scheduled auto-cleanup...`);
+      const baseTmpDir = '/tmp/clip-ai';
+      try {
+        const files = await fs.readdir(baseTmpDir);
+        const now = Date.now();
+        const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+        
+        let deletedCount = 0;
+        for (const file of files) {
+          const filePath = join(baseTmpDir, file);
+          const stats = await fs.stat(filePath);
+          if (now - stats.mtimeMs > TWENTY_FOUR_HOURS) {
+            await fs.rm(filePath, { recursive: true, force: true });
+            deletedCount++;
+          }
+        }
+        
+        // DB Cleanup for failed/draft clips older than 7 days
+        const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+        const sevenDaysAgo = new Date(now - SEVEN_DAYS);
+        
+        const deletedClips = await db.delete(clips).where(
+          and(
+            lt(clips.createdAt, sevenDaysAgo),
+            or(eq(clips.status, 'failed'), eq(clips.status, 'draft'))
+          )
+        ).returning();
+        
+        console.log(`[Job ${job.id}] Auto-cleanup completed. Deleted ${deletedCount} temp folders, ${deletedClips.length} old clips.`);
+        return { success: true, deletedCount, deletedClipsCount: deletedClips.length };
+      } catch (err: any) {
+        if (err.code !== 'ENOENT') {
+          console.error(`[Job ${job.id}] Auto-cleanup failed:`, err);
+          throw err;
+        }
+        return { success: true, deletedCount: 0, deletedClipsCount: 0 };
+      }
     } else {
       throw new Error(`Unknown job name: ${job.name}`);
     }
@@ -142,6 +180,16 @@ const worker = new Worker(
     concurrency: 1
   }
 );
+
+// Schedule the auto-cleanup job
+async function scheduleCleanup() {
+  await videoQueue.add('cleanup-temp-files', {}, {
+    repeat: { pattern: '0 3 * * *' }, // Run every day at 3:00 AM
+    jobId: 'system-auto-cleanup', // Ensure we only have one repeated job
+  });
+  console.log('Scheduled system auto-cleanup job at 03:00 AM.');
+}
+scheduleCleanup().catch(console.error);
 
 worker.on('completed', (job) => {
   console.log(`[Worker] Job ${job.id} has completed successfully!`);

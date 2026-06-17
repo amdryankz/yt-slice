@@ -3,7 +3,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path, { join } from 'path';
 import { Worker, Job } from 'bullmq';
-import { connection, videoQueue, type AnyJobPayload, type VideoJobPayload, type CutClipJobPayload } from '@workspace/jobs';
+import { connection, videoQueue, redisPublisher, type AnyJobPayload, type VideoJobPayload, type CutClipJobPayload } from '@workspace/jobs';
 import { db, podcasts, clips } from '@workspace/db';
 import { eq, lt, or, and } from 'drizzle-orm';
 import { downloadAudio, getAudioDuration } from './lib/downloader';
@@ -70,6 +70,8 @@ const worker = new Worker(
           .set({ status: 'completed' })
           .where(eq(podcasts.id, podcastId));
           
+        await redisPublisher.publish(`podcast_events_${podcastId}`, JSON.stringify({ type: 'REFRESH_CLIPS' }));
+          
         console.log(`[Job ${job.id}] Completed processing podcast ${podcastId}`);
         return { success: true, audioPath, suggestionsCount: suggestions.length };
       } finally {
@@ -83,6 +85,7 @@ const worker = new Worker(
       const { clipId } = job.data as CutClipJobPayload;
       
       console.log(`[Job ${job.id}] Cutting clip ${clipId}`);
+      let podcastIdToNotify: string | null = null;
       
       try {
         const clip = await db.query.clips.findFirst({
@@ -92,6 +95,8 @@ const worker = new Worker(
         if (!clip) {
           throw new Error(`Clip ${clipId} not found in database.`);
         }
+        
+        podcastIdToNotify = clip.podcastId;
         
         const podcast = await db.query.podcasts.findFirst({
           where: eq(podcasts.id, clip.podcastId!),
@@ -119,6 +124,10 @@ const worker = new Worker(
           .set({ status: 'completed', clipPath: publicUrl })
           .where(eq(clips.id, clipId));
           
+        if (podcastIdToNotify) {
+          await redisPublisher.publish(`podcast_events_${podcastIdToNotify}`, JSON.stringify({ type: 'REFRESH_CLIPS' }));
+        }
+          
         // Cleanup temp files
         await fs.unlink(outputPath).catch(() => {});
         await fs.unlink(`${outputPath}.tmp.mp4`).catch(() => {});
@@ -131,6 +140,11 @@ const worker = new Worker(
           .update(clips)
           .set({ status: 'failed' })
           .where(eq(clips.id, clipId));
+          
+        if (podcastIdToNotify) {
+          await redisPublisher.publish(`podcast_events_${podcastIdToNotify}`, JSON.stringify({ type: 'REFRESH_CLIPS' }));
+        }
+          
         throw error;
       }
     } else if (job.name === 'cleanup-temp-files') {

@@ -1,4 +1,5 @@
 export * from './queue';
+export * from './pubsub';
 
 export interface VideoJobPayload {
   podcastId: string;

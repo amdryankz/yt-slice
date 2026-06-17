@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import ReactPlayer from "react-player";
 import Link from "next/link";
 import { ArrowLeft, Trash2, Loader2 } from "lucide-react";
@@ -14,6 +14,32 @@ export default function PodcastDetailClient({ podcast, generatedClips }: { podca
   const [isDeletingPodcast, setIsDeletingPodcast] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [previewEndTime, setPreviewEndTime] = useState<number | null>(null);
+
+  useEffect(() => {
+    const eventSource = new EventSource(`/api/podcasts/${podcast.id}/events`);
+    
+    eventSource.onmessage = (event) => {
+      if (event.data === 'ping') return;
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload.type === 'REFRESH_CLIPS') {
+          // Re-fetch clips quietly in the background
+          fetch(`/api/podcasts/${podcast.id}/clips`)
+            .then(res => res.json())
+            .then(data => {
+              if (data.clips) {
+                setLocalClips(data.clips);
+              }
+            })
+            .catch(err => console.error("Failed to refetch clips via SSE", err));
+        }
+      } catch (e) {}
+    };
+
+    return () => {
+      eventSource.close();
+    };
+  }, [podcast.id]);
 
   function handlePreviewClip(start: number, end: number) {
     if (playerRef.current) {

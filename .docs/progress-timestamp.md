@@ -325,3 +325,30 @@ Prevent the server disk and database from silently inflating over time due to or
 - Integrated a Drizzle ORM query utilizing `lt` (less than), `or`, and `and` operators.
 - Deletes any `clips` row where the status is explicitly stuck in `draft` or `failed` AND the `createdAt` timestamp is older than **7 days**.
 - Leaves `completed` clips intact, ensuring successful S3 videos remain accessible indefinitely.
+
+---
+
+## Progress Report: SSE & Redis Pub/Sub Migration
+
+### Objective
+Upgrade the frontend user experience from a completely static page to a highly reactive, real-time application without relying on expensive, heavy third-party services (like Pusher or Socket.io) or inefficient UI polling (`setInterval`).
+
+### Completed Tasks
+
+#### 1. Redis Pub/Sub Bridge (`pubsub.ts`)
+- Leveraged the existing local Redis Docker container to instantiate `redisPublisher` and `redisSubscriber` instances within `@workspace/jobs`.
+- This creates an ultra-fast, zero-latency communication bridge between the isolated background Worker and the Next.js API.
+
+#### 2. Worker Broadcasts (`worker/src/index.ts`)
+- Configured the background worker to fire asynchronous `publish` events to a unique channel (`podcast_events_${podcastId}`).
+- A `REFRESH_CLIPS` signal is broadcasted immediately whenever the Gemini AI analysis concludes OR when FFmpeg finishes rendering and pushing a clip to S3.
+
+#### 3. Native Next.js SSE Stream (`events/route.ts`)
+- Engineered a pristine `text/event-stream` API route in the Next.js App Router.
+- The route opens a persistent `ReadableStream` connection to the browser, instantly forwarding any messages received from the Redis Subscriber.
+- Includes a 30-second `ping` heartbeat to prevent browsers from forcefully closing the idle connection.
+
+#### 4. React EventSource Connection (`PodcastDetailClient.tsx`)
+- Intercepted the static React architecture and injected a `useEffect` hook to open an `EventSource` connection to the SSE stream.
+- When the `REFRESH_CLIPS` payload is caught, React silently fetches the updated database records via a new `GET /api/podcasts/[id]/clips` handler.
+- The UI progress bars and video states now update seemingly by magic the precise millisecond the worker finishes its job!

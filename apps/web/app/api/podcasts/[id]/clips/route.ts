@@ -2,6 +2,20 @@ import { NextResponse } from 'next/server';
 import { db, clips, podcasts } from '@workspace/db';
 import { eq } from 'drizzle-orm';
 
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { id: podcastId } = await params;
+    const allClips = await db.query.clips.findMany({
+      where: eq(clips.podcastId, podcastId),
+      orderBy: (clips, { asc }) => [asc(clips.startTime)]
+    });
+    return NextResponse.json({ clips: allClips }, { status: 200 });
+  } catch (error) {
+    console.error('Failed to fetch clips:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id: podcastId } = await params;

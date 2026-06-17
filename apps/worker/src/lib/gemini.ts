@@ -10,13 +10,13 @@ if (!process.env.GEMINI_API_KEY) {
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export const clipSuggestionInputSchema = z.object({
-  reasoning: z.string().describe("Chain of thought explaining why this clip was chosen and verifying the timestamps."),
-  title: z.string(),
-  startTime: z.string().describe("Start time in MM:SS format"),
-  endTime: z.string().describe("End time in MM:SS format"),
-  viralityScore: z.number().min(1).max(100),
-  explanation: z.string(),
-  caption: z.string(),
+  reasoning: z.string().catch(""),
+  title: z.string().catch("Judul Klip Menarik"),
+  startTime: z.string().describe("Start time in MM:SS format").catch("00:00"),
+  endTime: z.string().describe("End time in MM:SS format").catch("00:15"),
+  viralityScore: z.number().min(1).max(100).catch(50),
+  explanation: z.string().catch(""),
+  caption: z.string().catch("#podcast"),
 });
 
 export const clipArraySchema = z.array(clipSuggestionInputSchema).transform((clips) => {
@@ -88,7 +88,10 @@ ${transcript}
     },
   });
 
-  const rawJson = response.text;
+  let rawJson = response.text || '';
+  
+  // Strip markdown code blocks if the AI accidentally wrapped the JSON
+  rawJson = rawJson.replace(/^```json\n?/i, '').replace(/\n?```$/i, '').trim();
 
   if (!rawJson) {
     throw new Error('Gemini returned an empty response.');

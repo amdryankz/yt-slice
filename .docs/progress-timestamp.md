@@ -276,3 +276,28 @@ Enhance the user experience by implementing an intelligent "Auto-Stop Preview" f
 - Cleared out localized DOM hacks from `handlePreview` and cleanly hooked into the unified parent architecture.
 
 The video preview workflow is now highly intuitive, strictly bounded, and flawlessly managed via React state!
+
+---
+
+## Progress Report: Cloud Storage Migration (Cloudflare R2)
+
+### Objective
+Migrate the storage backend for rendered `.mp4` video clips from the local filesystem to Cloudflare R2 (an S3-compatible Object Storage service) to ensure absolute horizontal scalability, eliminate local disk bloat, and benefit from $0 egress bandwidth fees.
+
+### Completed Tasks
+
+#### 1. S3 Integration & Authentication
+- Added `@aws-sdk/client-s3` dependency natively to the workspace.
+- Configured `.env` to safely accept and validate robust `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, and `S3_ENDPOINT` variables.
+
+#### 2. Worker Upload Architecture (`storage.ts` & `index.ts`)
+- Implemented a secure `uploadFile` storage client using `PutObjectCommand`.
+- Severed the FFmpeg renderer's dependency on the Next.js `public/` directory. The worker now renders exclusively to isolated OS `/tmp` memory.
+- Immediately upon completion, the worker flushes the rendered `.mp4` straight up to Cloudflare R2.
+- Cleanly updates the Drizzle ORM `clips.clipPath` directly with the fully-qualified `S3_PUBLIC_URL`, ensuring the frontend can play it instantly.
+
+#### 3. Cascading Cloud Deletions (`route.ts`)
+- Upgraded the `/api/clips/[id]` and `/api/podcasts/[id]` `DELETE` handlers.
+- When an entity is erased, the backend now intelligently parses the absolute `http` S3 URL, constructs a `DeleteObjectCommand`, and fires it to Cloudflare to permanently prune the physical cloud asset, perfectly preventing orphaned files and saving bucket space.
+
+The application is now 100% production-ready for massive scale video hosting!

@@ -24,12 +24,17 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     // Delete clip files
     for (const clip of associatedClips) {
       if (clip.clipPath) {
-        const filePath = path.join(process.cwd(), "public", clip.clipPath);
-        try {
-          await fs.unlink(filePath);
-        } catch (err: any) {
-          if (err.code !== 'ENOENT') {
-            console.error(`Failed to delete file ${filePath}:`, err);
+        if (clip.clipPath.startsWith('http')) {
+          const { deleteFile } = await import('../../../../lib/storage');
+          await deleteFile(clip.clipPath);
+        } else {
+          const filePath = path.join(process.cwd(), "public", clip.clipPath);
+          try {
+            await fs.unlink(filePath);
+          } catch (err: any) {
+            if (err.code !== 'ENOENT') {
+              console.error(`Failed to delete file ${filePath}:`, err);
+            }
           }
         }
       }

@@ -1,5 +1,6 @@
 import './env';
 import fs from 'fs/promises';
+import os from 'os';
 import path, { join } from 'path';
 import { Worker, Job } from 'bullmq';
 import { connection, type AnyJobPayload, type VideoJobPayload, type CutClipJobPayload } from '@workspace/jobs';
@@ -9,6 +10,7 @@ import { downloadAudio, getAudioDuration } from './lib/downloader';
 import { transcribeAudio } from './lib/transcriber';
 import { analyzeTranscript } from './lib/gemini';
 import { cutVideoSegment } from './lib/clipper';
+import { uploadFile } from './lib/storage';
 
 if (!process.env.DEEPGRAM_API_KEY) {
   console.warn('WARNING: DEEPGRAM_API_KEY is missing from environment variables.');
@@ -99,26 +101,30 @@ const worker = new Worker(
           throw new Error(`Podcast ${clip.podcastId} not found for clip ${clipId}.`);
         }
         
-        const publicClipsDir = path.resolve("../web/public/clips");
-        await fs.mkdir(publicClipsDir, { recursive: true });
-        
+        const tmpDir = os.tmpdir();
         const fileName = `clip-${clip.id}.mp4`;
-        const outputPath = path.join(publicClipsDir, fileName);
+        const outputPath = path.join(tmpDir, fileName);
         
         console.log(`[Job ${job.id}] Downloading and formatting video segment to ${outputPath}...`);
         
         await cutVideoSegment(podcast.sourceUrl, clip.startTime, clip.endTime, outputPath, job.data.format as any, job.data.watermarkText);
         
-        console.log(`[Job ${job.id}] Cut successful!`);
+        console.log(`[Job ${job.id}] Cut successful! Uploading to S3...`);
         
-        const clipPath = `/clips/${fileName}`;
+        const publicUrl = await uploadFile(outputPath, fileName);
+        console.log(`[Job ${job.id}] Upload successful: ${publicUrl}`);
         
         await db
           .update(clips)
-          .set({ status: 'completed', clipPath })
+          .set({ status: 'completed', clipPath: publicUrl })
           .where(eq(clips.id, clipId));
           
-        return { success: true, clipPath };
+        // Cleanup temp files
+        await fs.unlink(outputPath).catch(() => {});
+        await fs.unlink(`${outputPath}.tmp.mp4`).catch(() => {});
+        await fs.unlink(`${outputPath}.tmp.ass`).catch(() => {});
+          
+        return { success: true, clipPath: publicUrl };
       } catch (error: any) {
         console.error(`[Job ${job.id}] Failed to cut clip:`, error);
         await db

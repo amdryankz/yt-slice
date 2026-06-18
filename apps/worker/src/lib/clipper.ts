@@ -181,7 +181,7 @@ export async function cutVideoSegment(
     const phrases = groupWords(allWords, 20, 5, 0.4)
 
     // Calculate Y position based on format to avoid TikTok UI
-    const posY = format === "crop" || format === "blur" ? 1450 : 1800
+    const posY = format === "crop" || format === "blur" ? 1300 : 1700
 
     const assHeader = `[Script Info]
 ScriptType: v4.00+

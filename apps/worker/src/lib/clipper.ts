@@ -2,6 +2,7 @@ import fs from "node:fs/promises"
 import { createReadStream } from "node:fs"
 import path from "node:path"
 import { createClient } from "@deepgram/sdk"
+import { getRandomProxy } from "./proxy"
 
 if (!process.env.DEEPGRAM_API_KEY) {
   throw new Error("DEEPGRAM_API_KEY is missing from environment variables.")
@@ -35,7 +36,7 @@ export async function cutVideoSegment(
       "--js-runtimes",
       "deno",
       "--proxy",
-      "http://krqhgqmx:uifephb7tjm2@31.59.20.176:6754",
+      getRandomProxy(),
       "--extractor-args",
       "youtube:client=ios",
       "-o",
@@ -194,9 +195,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
               
               if (wIndex === activeIndex) {
                 const isStopWord = STOP_WORDS.has(cleanWord)
-                const animTag = `{\\fscx120\\fscy120\\t(0,150,\\fscx100\\fscy100)}`
                 const colorTag = isStopWord ? `{\\c&HFFFFFF&}` : `{\\c&H00FFFF&}`
-                return `${colorTag}${animTag}${cleanWord}{\\r}`
+                return `${colorTag}${cleanWord}{\\r}`
               }
               return cleanWord
             })

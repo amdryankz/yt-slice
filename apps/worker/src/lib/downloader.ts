@@ -1,4 +1,5 @@
 import { join } from 'path';
+import { getRandomProxy } from './proxy';
 
 export async function downloadAudio(url: string, workDir: string): Promise<string> {
   const outputPathTemplate = join(workDir, 'audio.%(ext)s');
@@ -13,7 +14,7 @@ export async function downloadAudio(url: string, workDir: string): Promise<strin
     '--js-runtimes',
     'deno',
     '--proxy',
-    'http://krqhgqmx:uifephb7tjm2@31.59.20.176:6754',
+    getRandomProxy(),
     '--extractor-args',
     'youtube:client=ios',
     '--output',

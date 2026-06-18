@@ -41,13 +41,13 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       // Handle client disconnect
       req.signal.addEventListener('abort', () => {
         clearInterval(interval);
-        subscriber.unsubscribe(channel);
-        subscriber.quit();
+        subscriber.unsubscribe(channel).catch(() => {});
+        subscriber.quit().catch(() => {});
       });
     },
     cancel() {
-      subscriber.unsubscribe(channel);
-      subscriber.quit();
+      subscriber.unsubscribe(channel).catch(() => {});
+      subscriber.quit().catch(() => {});
     }
   });
 

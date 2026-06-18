@@ -1,0 +1,13 @@
+#!/usr/bin/expect -f
+set timeout 10
+spawn ssh -p 22 root@213.136.64.179 "tail -n 50 /root/.pm2/logs/clipper-web-error.log /root/.pm2/logs/clipper-worker-error.log"
+expect {
+    "yes/no" {
+        send "yes\n"
+        exp_continue
+    }
+    "password:" {
+        send "3R5bdC0G\n"
+    }
+}
+expect eof

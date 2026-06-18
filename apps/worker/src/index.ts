@@ -187,13 +187,18 @@ const worker = new Worker(
         return { success: true, clipPath: publicUrl };
       } catch (error: any) {
         console.error(`[Job ${job.id}] Failed to cut clip:`, error);
-        await db
-          .update(clips)
-          .set({ status: 'failed' })
-          .where(eq(clips.id, clipId));
-          
-        if (podcastIdToNotify) {
-          await redisPublisher.publish(`podcast_events_${podcastIdToNotify}`, JSON.stringify({ type: 'REFRESH_CLIPS' }));
+        
+        // Prevent race condition: don't overwrite if another job already completed it
+        const currentClip = await db.query.clips.findFirst({ where: eq(clips.id, clipId) });
+        if (currentClip && currentClip.status !== 'completed') {
+          await db
+            .update(clips)
+            .set({ status: 'failed' })
+            .where(eq(clips.id, clipId));
+            
+          if (podcastIdToNotify) {
+            await redisPublisher.publish(`podcast_events_${podcastIdToNotify}`, JSON.stringify({ type: 'REFRESH_CLIPS' }));
+          }
         }
           
         throw error;
@@ -281,7 +286,12 @@ worker.on('failed', async (job, err) => {
       const { clipId } = job.data as CutClipJobPayload;
       const clip = await db.query.clips.findFirst({ where: eq(clips.id, clipId) });
       if (clip && clip.podcastId) {
-        await db.update(clips).set({ status: 'failed', errorMessage }).where(eq(clips.id, clipId));
+        // Prevent old failing jobs from overwriting a newly completed job
+        if (clip.status === 'completed') {
+           console.log(`[Worker] Ignoring failure for job ${job.id} because clip ${clipId} is already completed by another job.`);
+        } else {
+           await db.update(clips).set({ status: 'failed', errorMessage }).where(eq(clips.id, clipId));
+        }
         await redisPublisher.publish(`podcast_events_${clip.podcastId}`, JSON.stringify({ type: 'REFRESH_CLIPS' }));
       }
     }

@@ -5,6 +5,8 @@ export const podcasts = pgTable('podcasts', {
   title: text('title').notNull(),
   sourceUrl: text('source_url').notNull(),
   videoPath: text('video_path'),
+  transcript: text('transcript'),
+  durationSeconds: integer('duration_seconds'),
   status: text('status').default('processing').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });

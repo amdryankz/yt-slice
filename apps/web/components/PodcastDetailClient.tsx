@@ -3,18 +3,32 @@
 import { useState, useRef, useEffect } from "react";
 import ReactPlayer from "react-player";
 import Link from "next/link";
-import { ArrowLeft, Trash2, Loader2 } from "lucide-react";
+import { ArrowLeft, Trash2, Loader2, RefreshCw } from "lucide-react";
 import toast from "react-hot-toast";
 import ClipCard from "./ClipCard";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@workspace/ui/components/alert-dialog";
 
 export default function PodcastDetailClient({ podcast, generatedClips }: { podcast: any, generatedClips: any[] }) {
-  const playerRef = useRef<ReactPlayer>(null);
+  const playerRef = useRef<any>(null);
   const [playedSeconds, setPlayedSeconds] = useState(0);
   const [localClips, setLocalClips] = useState(generatedClips);
   const [isAdding, setIsAdding] = useState(false);
   const [isDeletingPodcast, setIsDeletingPodcast] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [previewEndTime, setPreviewEndTime] = useState<number | null>(null);
+  const [showDeletePodcastConfirm, setShowDeletePodcastConfirm] = useState(false);
+  const [showRegenerateConfirm, setShowRegenerateConfirm] = useState(false);
 
   useEffect(() => {
     const eventSource = new EventSource(`/api/podcasts/${podcast.id}/events`);
@@ -60,7 +74,6 @@ export default function PodcastDetailClient({ podcast, generatedClips }: { podca
   }
 
   async function handleDeletePodcast() {
-    if (!confirm("Yakin ingin menghapus podcast ini beserta semua klipnya? Tindakan ini tidak dapat dibatalkan.")) return;
     setIsDeletingPodcast(true);
     try {
       const res = await fetch(`/api/podcasts/${podcast.id}`, { method: 'DELETE' });
@@ -72,6 +85,30 @@ export default function PodcastDetailClient({ podcast, generatedClips }: { podca
       toast.error('Gagal menghapus podcast');
       setIsDeletingPodcast(false);
     }
+  }
+
+  async function handleRegenerateClips() {
+    setIsRegenerating(true);
+    const loadingToast = toast.loading('Meminta AI membuat klip ulang...');
+    
+    try {
+      const res = await fetch(`/api/podcasts/${podcast.id}/regenerate`, { method: 'POST' });
+      const data = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to regenerate clips');
+      }
+      
+      toast.success('Permintaan berhasil! AI sedang bekerja di latar belakang...', { id: loadingToast });
+    } catch (error: any) {
+      console.error(error);
+      toast.error(error.message || 'Gagal memulai regenerasi klip', { id: loadingToast });
+      setIsRegenerating(false);
+    }
+    // We don't need to manually setIsRegenerating(false) on success 
+    // because the SSE will trigger REFRESH_CLIPS soon, or user can just see it disabled.
+    // But let's enable it after 30 seconds just in case.
+    setTimeout(() => setIsRegenerating(false), 30000);
   }
 
   async function handleAddManualClip() {
@@ -134,13 +171,49 @@ export default function PodcastDetailClient({ podcast, generatedClips }: { podca
           </div>
         </div>
         
-        <button 
-          onClick={handleDeletePodcast}
-          disabled={isDeletingPodcast}
-          className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-xl font-semibold transition-colors disabled:opacity-50"
-        >
-          {isDeletingPodcast ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />} Hapus Podcast
-        </button>
+        <div className="flex items-center gap-3">
+          <AlertDialog open={showRegenerateConfirm} onOpenChange={setShowRegenerateConfirm}>
+            <AlertDialogTrigger
+                disabled={isRegenerating}
+                className="flex items-center gap-2 px-4 py-2 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-xl font-semibold transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+              >
+                {isRegenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Regenerate Clips
+            </AlertDialogTrigger>
+            <AlertDialogContent className="bg-slate-900 border-slate-700 text-slate-200">
+              <AlertDialogHeader>
+                <AlertDialogTitle className="text-white">Regenerate Klip?</AlertDialogTitle>
+                <AlertDialogDescription className="text-slate-400">
+                  Ide klip yang berstatus draft/failed akan dihapus dan diganti dengan ide klip baru dari AI. Lanjutkan?
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel className="bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700 hover:text-white">Batal</AlertDialogCancel>
+                <AlertDialogAction onClick={handleRegenerateClips} className="bg-purple-600 text-white hover:bg-purple-700">Regenerate</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+          
+          <AlertDialog open={showDeletePodcastConfirm} onOpenChange={setShowDeletePodcastConfirm}>
+            <AlertDialogTrigger
+                disabled={isDeletingPodcast}
+                className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-xl font-semibold transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+              >
+                {isDeletingPodcast ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />} Hapus Podcast
+            </AlertDialogTrigger>
+            <AlertDialogContent className="bg-slate-900 border-slate-700 text-slate-200">
+              <AlertDialogHeader>
+                <AlertDialogTitle className="text-white">Hapus Podcast?</AlertDialogTitle>
+                <AlertDialogDescription className="text-slate-400">
+                  Yakin ingin menghapus podcast ini beserta semua klipnya? Tindakan ini tidak dapat dibatalkan.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel className="bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700 hover:text-white">Batal</AlertDialogCancel>
+                <AlertDialogAction onClick={handleDeletePodcast} className="bg-red-600 text-white hover:bg-red-700">Hapus</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
       </div>
 
       <div className="flex flex-col gap-10">

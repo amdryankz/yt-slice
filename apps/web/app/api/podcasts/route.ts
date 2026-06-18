@@ -31,6 +31,10 @@ export async function POST(req: Request) {
         status: 'processing',
       })
       .returning({ id: podcasts.id });
+      
+    if (!insertedPodcast) {
+      throw new Error('Failed to insert podcast');
+    }
 
     // Add to BullMQ
     await videoQueue.add('process-video', {

@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/s3-request-presigner": "^3.1070.0",
     "@workspace/db": "workspace:*",
     "@workspace/jobs": "workspace:*",
     "@workspace/ui": "workspace:*",

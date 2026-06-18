@@ -9,16 +9,18 @@ const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
 
 export async function transcribeAudio(audioPath: string): Promise<string> {
   console.log(`[Transcriber] Starting Deepgram transcription for audio: ${audioPath}`);
-  
+
   try {
     const audioBuffer = fs.readFileSync(audioPath);
-    
+
     const { result, error } = await deepgram.listen.prerecorded.transcribeFile(
       audioBuffer,
       {
-        model: 'nova-2',
-        smart_format: true,
+        model: 'nova-3',
+        detect_language: true,
+        diarize: true,
         utterances: true,
+        smart_format: true,
       }
     );
 

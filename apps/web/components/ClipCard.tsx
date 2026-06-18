@@ -3,6 +3,17 @@
 import { useState, useEffect } from "react";
 import { Flame, Edit2, Download, Copy, Check, Loader2, Play, MousePointer2, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@workspace/ui/components/alert-dialog";
 
 function formatTime(seconds: number) {
   const m = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -24,6 +35,7 @@ export default function ClipCard({ clip: initialClip, index, playerRef, playedSe
   const [editStartTime, setEditStartTime] = useState(initialClip.startTime);
   const [editEndTime, setEditEndTime] = useState(initialClip.endTime);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // Sync with parent SSE updates
   useEffect(() => {
@@ -89,7 +101,6 @@ export default function ClipCard({ clip: initialClip, index, playerRef, playedSe
   }
 
   async function handleDelete() {
-    if (!confirm("Yakin ingin menghapus klip ini?")) return;
     setIsDeleting(true);
     try {
       const res = await fetch(`/api/clips/${localClip.id}`, { method: 'DELETE' });
@@ -127,13 +138,26 @@ export default function ClipCard({ clip: initialClip, index, playerRef, playedSe
             <Flame className="w-4 h-4" />
             <span className="text-sm font-extrabold">{localClip.viralityScore}/100</span>
           </div>
-          <button 
-            onClick={handleDelete}
-            disabled={isDeleting}
-            className="flex items-center gap-1.5 text-xs font-semibold text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 px-2 py-1 rounded-lg transition-colors border border-red-500/20"
-          >
-            {isDeleting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />} Hapus
-          </button>
+          <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+            <AlertDialogTrigger
+                disabled={isDeleting}
+                className="flex items-center gap-1.5 text-xs font-semibold text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 px-2 py-1 rounded-lg transition-colors border border-red-500/20 cursor-pointer disabled:cursor-not-allowed"
+              >
+                {isDeleting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />} Hapus
+            </AlertDialogTrigger>
+            <AlertDialogContent className="bg-slate-900 border-slate-700 text-slate-200">
+              <AlertDialogHeader>
+                <AlertDialogTitle className="text-white">Hapus Klip?</AlertDialogTitle>
+                <AlertDialogDescription className="text-slate-400">
+                  Yakin ingin menghapus klip ini? Tindakan ini tidak dapat dibatalkan.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel className="bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700 hover:text-white">Batal</AlertDialogCancel>
+                <AlertDialogAction onClick={handleDelete} className="bg-red-600 text-white hover:bg-red-700">Hapus</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </div>
       
@@ -205,7 +229,7 @@ export default function ClipCard({ clip: initialClip, index, playerRef, playedSe
       </div>
 
       {localClip.status === 'completed' && localClip.clipPath ? (
-        <video controls className="w-full rounded-2xl mt-6 border border-white/10" src={localClip.clipPath} />
+        <video controls className="w-full rounded-2xl mt-6 border border-white/10" src={`/api/clips/${localClip.id}/video`} />
       ) : (
         <div className="mt-6 flex flex-col gap-3 mt-auto pt-2">
           

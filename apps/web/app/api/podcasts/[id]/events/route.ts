@@ -16,18 +16,20 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     start(controller) {
       // Listen for messages on the Redis channel
       subscriber.on('message', (chan, message) => {
+        if (req.signal.aborted) return;
         if (chan === channel) {
           try {
             // Encode the message in SSE format
             controller.enqueue(new TextEncoder().encode(`data: ${message}\n\n`));
           } catch (e) {
-            console.error('Failed to enqueue SSE message', e);
+            // Ignore closed stream errors
           }
         }
       });
       
       // Send a heartbeat ping every 30 seconds to keep the connection alive
       const interval = setInterval(() => {
+        if (req.signal.aborted) return;
         try {
           controller.enqueue(new TextEncoder().encode(': ping\n\n'));
         } catch(e) {}

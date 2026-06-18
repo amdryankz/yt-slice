@@ -371,3 +371,43 @@ Enhance user feedback across the application by replacing ugly, blocking browser
 - **`ClipCard.tsx`**: 
   - Added toasts for saving text edits, copying captions, deleting clips, and initiating the "Cut Video" FFmpeg process.
   - **Crucial Refactor**: Discovered and completely eliminated a lingering, redundant polling `setInterval` block inside the card component! The card now perfectly syncs via `useEffect` with the parent SSE data stream, achieving 100% true real-time reactivity without any polling overhead.
+
+---
+
+## Progress Report: AI Clip Regeneration Feature
+
+### Objective
+Allow users to easily re-roll and regenerate AI clip suggestions for an existing podcast without needing to re-download the video or re-pay for Deepgram transcription.
+
+### Completed Tasks
+
+#### 1. Database Schema Evolution
+- Added `transcript` and `durationSeconds` to the `podcasts` table schema.
+- Synchronized the local PostgreSQL database using `drizzle-kit push`.
+
+#### 2. Worker Enhancements
+- Modified the main `process-video` job to intercept and securely save the Deepgram transcript payload directly into the `podcasts` database table before passing it to Gemini.
+- Engineered a brand new `regenerate-clips` BullMQ job handler that purely targets the Gemini generation phase using pre-saved database transcripts, bypassing the expensive download and transcription phases entirely.
+
+#### 3. API & UI Integration
+- Built `POST /api/podcasts/[id]/regenerate` which intelligently prunes out bad/rejected ideas (deleting `draft` and `failed` clips while preserving `completed` ones) and queues the regeneration job.
+- Added a sleek "Regenerate Clips" button next to the Delete button on the Podcast Detail UI, featuring safety confirmation modals and real-time toast loading indicators.
+
+---
+
+## Progress Report: Word-by-Word Karaoke Subtitles (TikTok Style)
+
+### Objective
+Upgrade the subtitle rendering engine so that words light up individually exactly when spoken, capturing audience attention and significantly increasing viewer retention.
+
+### Completed Tasks
+
+#### 1. ASS Subtitle Architecture Overhaul
+- Completely restructured the `.ass` generation algorithm in `clipper.ts` from line-based to word-based.
+- Engineered a micro-timing loop that creates dedicated `Dialogue` events for every single word in a chunk.
+- Leveraged Deepgram's `word.start` and `word.end` boundaries to perfectly map the active timing of each text segment.
+
+#### 2. Dynamic Styling & Pop Effect
+- Implemented the `{\c&H00FFFF&}` ASS color tag trick to inject the TikTok Yellow color into the *active word* while maintaining the surrounding sentence in White (`{\c&HFFFFFF&}`).
+- Kept the font size optimized at `85` per user request, but significantly thickened the black text outline (`Outline=8`) to ensure the subtitles punch through visually on busy video backgrounds.
+- The output is highly optimized text manipulation, imposing zero extra rendering burden on FFmpeg compared to traditional video filters.

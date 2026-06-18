@@ -14,4 +14,8 @@ export interface CutClipJobPayload {
 
 export interface CleanupJobPayload {}
 
-export type AnyJobPayload = VideoJobPayload | CutClipJobPayload | CleanupJobPayload;
+export interface RegenerateJobPayload {
+  podcastId: string;
+}
+
+export type AnyJobPayload = VideoJobPayload | CutClipJobPayload | CleanupJobPayload | RegenerateJobPayload;

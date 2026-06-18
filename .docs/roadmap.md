@@ -1,50 +1,51 @@
-# 🚀 Clipper Project Roadmap & Backlog
+# 🚀 Clipper Project Roadmap v2.0
 
-Dokumen ini berisi daftar inisiatif dan fitur potensial untuk meningkatkan skalabilitas, stabilitas, dan User Experience (UX) dari aplikasi Clipper (selain integrasi Publishing Social Media). 
-
----
-
-## 🏗️ 1. Infrastructure & Storage Refactoring (Persiapan VPS/Production)
-*Prioritas tinggi jika ingin di-deploy ke server cloud (VPS).*
-
-- [ ] **Migrasi Local Storage ke Cloud Object Storage (AWS S3 / Cloudflare R2)**
-  - **Masalah:** Saat ini aplikasi menyimpan hasil render `.mp4` secara lokal di folder `apps/web/public/clips/`. Ini akan menghabiskan *disk space* VPS dengan cepat.
-  - **Solusi:** Worker harus diarahkan untuk mengunggah hasil render akhir langsung ke Bucket S3/R2, dan mengembalikan *Public URL* ke database.
-- [ ] **Sistem Auto-Cleanup Job (Cron Job)**
-  - **Masalah:** File video utuh dari YouTube dan *temporary files* (`.tmp.mp4`, `.ass`) yang tertinggal bisa menumpuk.
-  - **Solusi:** Buat *BullMQ Cron Job* yang otomatis berjalan setiap malam untuk membersihkan file mentah/sampah yang umurnya lebih dari 24 jam.
+*Sebagian besar infrastruktur dasar aplikasi (Cloud Storage S3, Auto-Cleanup Cron, Real-time SSE, Global Toasts) telah berhasil diselesaikan. Roadmap ini kini difokuskan pada tahap lanjutan untuk mengubah Clipper menjadi platform pembuat klip AI kelas dunia (SaaS).*
 
 ---
 
-## ✨ 2. Peningkatan User Experience (UX) Frontend
-*Fokus pada tampilan, kecepatan, dan interaktivitas bagi pengguna.*
+## 🤖 1. AI Video & Audio Intelligence (Keunggulan Kompetitif)
 
-- [ ] **Migrasi Polling ke WebSockets / Server-Sent Events (SSE)**
-  - **Masalah:** Saat ini frontend melakukan *polling* setiap 3 detik ke backend untuk mengecek apakah video sudah selesai dirender.
-  - **Solusi:** Terapkan koneksi *Server-Sent Events* (SSE) di Next.js agar notifikasi status "Completed" ter-*push* langsung secara instan tanpa membebani *bandwidth* server.
-- [ ] **Visual Video Timeline / Range Slider**
-  - **Fitur:** Mengubah *Inline Editor* untuk "Start Time" dan "End Time" menjadi komponen *drag-and-drop timeline waveform* interaktif (mirip UI *CapCut*) di halaman *PodcastDetail*.
-- [ ] **Global Error Toast & Notifications**
-  - **Fitur:** Hapus penggunaan `alert()` bawaan browser dan ganti dengan *Toast Notification Library* modern (seperti `sonner` atau `react-hot-toast`) agar aplikasi terasa lebih premium.
+- [ ] **Smart Face-Tracking Cropping (AI)**
+  - **Ide:** Saat mengubah video YouTube horizontal (16:9) menjadi vertikal (9:16) untuk TikTok, terkadang wajah pembicara keluar dari bingkai.
+  - **Solusi:** Gunakan filter `facedetect` bawaan FFmpeg (atau integrasi OpenCV ringan) agar *crop* video secara otomatis bergeser mengikuti letak wajah pembicara utama.
 
----
+- [ ] **Word-by-Word Karaoke Subtitles**
+  - **Ide:** Subtitle saat ini muncul per kalimat. Gaya TikTok modern menyorot kata secara individual (berubah warna) persis saat kata tersebut diucapkan.
+  - **Solusi:** Manfaatkan data `words` dari Deepgram, lalu buat skrip *Advanced SubStation Alpha (.ass)* yang menggunakan tag karaoke (`{\k}`) agar subtitle menyala kata-demi-kata.
 
-## 🤖 3. Peningkatan Kualitas AI & Rendering (Backend)
-*Membuat hasil potongan video lebih canggih dan kompetitif.*
-
-- [ ] **Face Tracking Auto-Crop (Smart Center)**
-  - **Fitur:** Saat ini kita menggunakan *static crop* (potong tengah). Kita bisa meningkatkan *worker* menggunakan filter FFmpeg pelacakan wajah, sehingga saat video di-*crop* ke vertikal (9:16), kamera selalu fokus mengikuti wajah orang yang sedang berbicara.
-- [ ] **Kustomisasi Gaya Subtitle Dinamis**
-  - **Fitur:** Berikan opsi dropdown/palet warna di `ClipCard` (Frontend) kepada pengguna untuk memilih *Font Family*, Warna Subtitle, dan Warna Outline secara bebas. Pilihan ini kemudian disuntikkan secara dinamis ke generator file `.ass` di *worker*.
-- [ ] **AI-Driven B-Roll & Visual Enhancements**
-  - **Fitur:** Meminta *Gemini* menentukan kata kunci (*keywords*) pada momen tertentu, lalu secara otomatis mengunduh video stok singkat (dari *Pexels API*) dan menyisipkannya ke video (B-Roll) untuk mengurangi visual yang monoton.
+- [ ] **Auto-Remove Silence & Stutters ("Umm/Ehh")**
+  - **Ide:** Menghilangkan jeda kosong yang terlalu lama atau kata-kata pengisi yang tidak perlu agar klip terasa lebih padat dan retensi penonton meningkat.
+  - **Solusi:** Gunakan AI transkripsi untuk mendeteksi *filler words* dan filter audio FFmpeg (`silenceremove`) untuk membuang keheningan.
 
 ---
 
-## 🔐 4. Multi-Tenant & User Management (Persiapan SaaS)
-*Persiapan dasar untuk menjadikan Clipper sebagai platform publik.*
+## 🎨 2. Personalisasi & Branding Studio
 
-- [ ] **Autentikasi Pengguna (Login/Register)**
-  - **Fitur:** Integrasikan **NextAuth.js** (Auth.js) agar orang harus login dengan akun Google atau Email sebelum bisa memotong podcast.
-- [ ] **Sistem Kuota / Credit Allocation**
-  - **Fitur:** Tambahkan mekanisme tabel `credits`. Memotong 1 jam podcast menghabiskan sekian kredit, memotong 1 klip menghabiskan 1 kredit. Ini dasar yang kuat sebelum memasang sistem pembayaran.
+- [ ] **Brand Kit & Custom Templates**
+  - **Ide:** Pengguna (atau Anda) ingin warna subtitle, posisi watermark, dan jenis font yang berbeda-beda untuk setiap klip.
+  - **Solusi:** Buat halaman UI "Brand Kit" untuk menyimpan preferensi warna hex, ukuran font, dan letak posisi, lalu lewatkan variabel tersebut ke *worker* FFmpeg.
+
+- [ ] **Auto B-Roll & Visual Hooks**
+  - **Ide:** Menambahkan gambar atau klip video stok di 3 detik pertama (Hook) untuk mencegah penonton men-*scroll* layar.
+  - **Solusi:** Minta Gemini AI untuk mendeteksi "kata kunci visual" pada awal kalimat, lalu aplikasikan *overlay* gambar sederhana melalui FFmpeg.
+
+---
+
+## 🌍 3. Distribusi Otomatis & SaaS (Fase Produksi Final)
+
+- [ ] **Social Media Direct Publisher**
+  - **Ide:** Daripada harus mengunduh lalu mengunggah klip secara manual, publikasikan langsung dari *dashboard*.
+  - **Solusi:** Gunakan NextAuth.js untuk *login* dengan TikTok/Google/Meta, simpan token akses, dan gunakan API resmi TikTok/YouTube untuk *auto-upload* klip yang sudah selesai di-render.
+
+- [ ] **User Authentication & Monetization (Stripe)**
+  - **Ide:** Membatasi akses publik agar server VPS Anda tidak kehabisan *resource* oleh orang asing, atau mulai memungut biaya (Langganan SaaS).
+  - **Solusi:** Integrasi Clerk / NextAuth untuk *login* pengguna, dan Drizzle ORM untuk mencatat "Kredit Pemotongan" (misal: 1 akun gratis 3 klip/hari).
+
+---
+
+## ⚡ 4. Optimalisasi Server VPS (Performance)
+
+- [ ] **GPU-Accelerated Rendering (NVENC/CUDA)**
+  - **Ide:** Jika di masa depan Anda menyewa VPS yang memiliki kartu grafis (GPU), proses FFmpeg bisa dipercepat hingga 10x lipat.
+  - **Solusi:** Instal *driver* NVIDIA di VPS dan ganti *encoder* FFmpeg di dalam *worker* dari `libx264` (CPU) menjadi `h264_nvenc` (GPU).

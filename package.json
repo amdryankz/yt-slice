@@ -7,7 +7,8 @@
     "dev": "turbo dev",
     "lint": "turbo lint",
     "format": "turbo format",
-    "typecheck": "turbo typecheck"
+    "typecheck": "turbo typecheck",
+    "migrate": "cd packages/db && bun run migrate"
   },
   "devDependencies": {
     "@types/fluent-ffmpeg": "^2.1.28",

@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 import { db, podcasts } from "@workspace/db";
 import { desc } from "drizzle-orm";
 import Link from "next/link";

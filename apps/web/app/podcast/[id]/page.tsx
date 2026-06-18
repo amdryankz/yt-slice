@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 import { db, podcasts, clips } from "@workspace/db";
 import { eq, asc } from "drizzle-orm";
 import { notFound } from "next/navigation";

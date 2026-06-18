@@ -36,6 +36,8 @@ export async function cutVideoSegment(
       "youtube:player_client=android",
       "--js-runtimes",
       "node",
+      "--cookies",
+      "/var/www/clipper/cookies.txt",
       "-o",
       tempPath,
       "--",

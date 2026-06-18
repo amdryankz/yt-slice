@@ -14,6 +14,8 @@ export async function downloadAudio(url: string, workDir: string): Promise<strin
     'youtube:player_client=android',
     '--js-runtimes',
     'node',
+    '--cookies',
+    '/var/www/clipper/cookies.txt',
     '--output',
     outputPathTemplate,
     url,

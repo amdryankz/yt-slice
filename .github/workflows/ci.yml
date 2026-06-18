@@ -33,3 +33,7 @@ jobs:
 
       - name: Build Web
         run: bun run build
+        env:
+          DATABASE_URL: "postgresql://dummy"
+          DEEPGRAM_API_KEY: "dummy"
+          GEMINI_API_KEY: "dummy"

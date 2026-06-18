@@ -76,98 +76,129 @@ export async function cutVideoSegment(
     if (!words || words.length === 0)
       throw new Error("No words returned from Deepgram")
 
-    const chunks = []
-    let currentChunk: any[] = []
-    let currentChunkLength = 0
+    function sanitizeText(value: string) {
+      return value
+        .replace(/\\/g, "\\\\")
+        .replace(/{/g, "\\{")
+        .replace(/}/g, "\\}")
+        .replace(/\n/g, " ")
+    }
 
-    for (const wordObj of words) {
-      currentChunk.push(wordObj)
+    function formatAssTime(seconds: number) {
+      const clamped = Math.max(0, seconds)
+      const hours = Math.floor(clamped / 3600)
+      const minutes = Math.floor((clamped % 3600) / 60)
+        .toString()
+        .padStart(2, "0")
+      const secs = Math.floor(clamped % 60)
+        .toString()
+        .padStart(2, "0")
+      const centis = Math.floor((clamped - Math.floor(clamped)) * 100)
+        .toString()
+        .padStart(2, "0")
+      return `${hours}:${minutes}:${secs}.${centis}`
+    }
 
-      const cleanWord = (wordObj.punctuated_word || wordObj.word).replace(
-        /[.,!?]/g,
-        ""
-      )
-      currentChunkLength += cleanWord.length
+    const STOP_WORDS = new Set(['DI', 'KE', 'DARI', 'YANG', 'DAN', 'ATAU', 'UNTUK', 'PADA', 'INI', 'ITU', 'DENGAN', 'DALAM', 'ADALAH', 'KITA', 'KAMI', 'SAYA', 'DIA', 'MEREKA', 'AKU', 'KAMU', 'BISA', 'TIDAK', 'ADA', 'AKAN', 'TAPI', 'JUGA', 'SUDAH', 'SAJA'])
 
-      const isPunctuation = /[.!?]$/.test(wordObj.punctuated_word || "")
-      const isPause =
-        currentChunk.length > 1 &&
-        wordObj.start - currentChunk[currentChunk.length - 2].end > 0.4
+    type Phrase = {
+      words: any[]
+      start: number
+      end: number
+    }
 
-      // Break chunk at 5 words, OR if char count > 25, or on punctuation, or significant pause
-      if (
-        currentChunk.length >= 5 ||
-        currentChunkLength >= 25 ||
-        isPunctuation ||
-        isPause
-      ) {
-        chunks.push(currentChunk)
-        currentChunk = []
-        currentChunkLength = 0
+    function groupWords(
+      words: any[],
+      minWords: number,
+      maxWords: number,
+      gapThreshold: number
+    ): Phrase[] {
+      const grouped: Phrase[] = []
+      let current: any[] = []
+
+      for (let i = 0; i < words.length; i++) {
+        const word = words[i]
+        const previous = current.at(-1)
+        
+        const isPunctuation = previous && /[.!?,:;]$/.test(previous.punctuated_word ?? "")
+        const isPause = previous && (word.start - previous.end > gapThreshold)
+        const isMax = current.length >= maxWords
+        
+        const previousWordClean = previous ? (previous.punctuated_word || previous.word).replace(/[.,!?]/g, "").toUpperCase() : ""
+        const isPreviousStopWord = STOP_WORDS.has(previousWordClean)
+
+        const shouldBreak = isMax || 
+          (current.length >= minWords && !isPreviousStopWord && (isPunctuation || isPause))
+
+        if (shouldBreak && current.length > 0) {
+          grouped.push({
+            words: current,
+            start: current[0].start,
+            end: current[current.length - 1].end,
+          })
+          current = []
+        }
+
+        current.push(word)
       }
-    }
-    if (currentChunk.length > 0) chunks.push(currentChunk)
 
-    const formatAssTime = (seconds: number) => {
-      const h = Math.floor(seconds / 3600)
-      const m = Math.floor((seconds % 3600) / 60)
-        .toString()
-        .padStart(2, "0")
-      const s = Math.floor(seconds % 60)
-        .toString()
-        .padStart(2, "0")
-      const cs = Math.floor((seconds % 1) * 100)
-        .toString()
-        .padStart(2, "0")
-      return `${h}:${m}:${s}.${cs}`
+      if (current.length > 0) {
+        grouped.push({
+          words: current,
+          start: current[0].start,
+          end: current[current.length - 1].end,
+        })
+      }
+
+      return grouped
     }
+
+    const phrases = groupWords(words, 2, 6, 0.5)
+
+    // Calculate MarginV based on format to avoid TikTok UI
+    const marginV = (format === "crop" || format === "blur") ? 350 : 80
 
     const assHeader = `[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
 PlayResY: 1920
+ScaledBorderAndShadow: yes
 WrapStyle: 1
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Impact,80,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,8,4,2,40,40,400,1
+Style: Default,Impact,80,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,8,4,2,80,80,${marginV},1
 Style: Watermark,Arial,35,&H50FFFFFF,&H000000FF,&H50000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,8,40,40,150,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `
 
-    const assEvents = chunks
-      .flatMap((chunk) => {
-        // Create one Dialogue line for each word to achieve TikTok-style highlight
-        return chunk.map((activeWord, activeIndex) => {
+    const assEvents = phrases
+      .flatMap((phrase) => {
+        return phrase.words.map((activeWord, activeIndex) => {
           const start = formatAssTime(activeWord.start)
-
-          // End time is exactly the start of the next word, to prevent flickering (empty frames).
-          // Since we use \\pos, libass won't stack them even if they touch or overlap perfectly.
+          
           const endSeconds =
-            activeIndex < chunk.length - 1
-              ? chunk[activeIndex + 1].start
+            activeIndex < phrase.words.length - 1
+              ? phrase.words[activeIndex + 1].start
               : activeWord.end + 0.1
           const end = formatAssTime(endSeconds)
 
-          // Build the text with color tags
-          let text = chunk
+          const text = phrase.words
             .map((w, wIndex) => {
-              const wordText = (w.punctuated_word || w.word)
-                .replace(/[.,!?]/g, "")
-                .toUpperCase()
+              const rawWord = (w.punctuated_word || w.word).replace(/[.,!?]/g, "")
+              const cleanWord = sanitizeText(rawWord).toUpperCase()
+              
               if (wIndex === activeIndex) {
-                // Highlight active word in Yellow (&H00FFFF& in ASS BBGGRR format)
-                return `{\\c&H00FFFF&}${wordText}{\\c&HFFFFFF&}`
+                const isStopWord = STOP_WORDS.has(cleanWord)
+                const animTag = `{\\fscx120\\fscy120\\t(0,150,\\fscx100\\fscy100)}`
+                const colorTag = isStopWord ? `{\\c&HFFFFFF&}` : `{\\c&H00FFFF&}`
+                return `${colorTag}${animTag}${cleanWord}{\\r}`
               }
-              return wordText
+              return cleanWord
             })
             .join(" ")
-
-          // Prepend \\pos to completely disable libass collision handling (stacking)
-          // 540 is center X for 1080p, 1350 is safe Y for TikTok UI
-          text = `{\\pos(540,1350)}${text}`
 
           return `Dialogue: 0,${start},${end},Default,,0,0,0,,${text}`
         })

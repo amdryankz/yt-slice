@@ -1,0 +1,13 @@
+#!/usr/bin/expect -f
+set timeout 60
+spawn ssh -p 22 root@213.136.64.179 "cd /var/www/clipper && git pull && export PATH=\"\$PATH:/root/.bun/bin\" && cd packages/db && bun run migrate && cd /var/www/clipper && bun run build && pm2 restart clipper-web clipper-worker"
+expect {
+    "yes/no" {
+        send "yes\n"
+        exp_continue
+    }
+    "password:" {
+        send "3R5bdC0G\n"
+    }
+}
+expect eof

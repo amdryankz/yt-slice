@@ -158,8 +158,9 @@ export async function cutVideoSegment(
 
     const phrases = groupWords(words, 2, 6, 0.5)
 
-    // Calculate MarginV based on format to avoid TikTok UI
-    const marginV = (format === "crop" || format === "blur") ? 350 : 80
+    // Calculate Y position based on format to avoid TikTok UI
+    // In ASS with Alignment 2, \pos(x,y) anchors the bottom-center of the text to (x,y)
+    const posY = (format === "crop" || format === "blur") ? 1450 : 1800
 
     const assHeader = `[Script Info]
 ScriptType: v4.00+
@@ -170,7 +171,7 @@ WrapStyle: 1
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Impact,80,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,8,4,2,80,80,${marginV},1
+Style: Default,Impact,65,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,8,4,2,80,80,0,1
 Style: Watermark,Arial,35,&H50FFFFFF,&H000000FF,&H50000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,8,40,40,150,1
 
 [Events]
@@ -188,7 +189,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
               : activeWord.end + 0.1
           const end = formatAssTime(endSeconds)
 
-          const text = phrase.words
+          let text = phrase.words
             .map((w, wIndex) => {
               const rawWord = (w.punctuated_word || w.word).replace(/[.,!?]/g, "")
               const cleanWord = sanitizeText(rawWord).toUpperCase()
@@ -201,6 +202,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
               return cleanWord
             })
             .join(" ")
+
+          // Force absolute positioning to completely disable libass collision stacking
+          // \an2 anchors the bottom-center of the text to the given (x,y)
+          text = `{\\an2\\pos(540,${posY})}${text}`
 
           return `Dialogue: 0,${start},${end},Default,,0,0,0,,${text}`
         })

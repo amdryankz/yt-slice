@@ -15,6 +15,11 @@ bun install
 echo "🗄️ Running database migrations..."
 bun run migrate
 
+# Sync environment variables to inner workspaces
+echo "🔄 Syncing environment variables..."
+cp .env apps/web/.env
+cp .env apps/worker/.env
+
 # Build the Next.js app
 echo "🏗️ Building Next.js application..."
 bun run build

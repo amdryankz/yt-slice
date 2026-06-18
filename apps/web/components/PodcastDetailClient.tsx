@@ -217,6 +217,18 @@ export default function PodcastDetailClient({ podcast, generatedClips }: { podca
       </div>
 
       <div className="flex flex-col gap-10">
+        {podcast.status === 'failed' && podcast.errorMessage && (
+          <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex items-start gap-3 shadow-xl">
+            <div className="bg-red-500/20 p-2 rounded-lg text-red-400 shrink-0">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </div>
+            <div>
+              <h4 className="text-red-400 font-bold">Pemrosesan Gagal</h4>
+              <p className="text-red-300 text-sm mt-1">{podcast.errorMessage}</p>
+            </div>
+          </div>
+        )}
+
         {/* Queue Status Board */}
         <div className="bg-slate-900/50 backdrop-blur-xl border border-white/10 rounded-2xl p-6 shadow-xl">
           <div className="flex items-center justify-between mb-4">

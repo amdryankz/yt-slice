@@ -160,6 +160,13 @@ export default function ClipCard({ clip: initialClip, index, playerRef, playedSe
           </AlertDialog>
         </div>
       </div>
+
+      {localClip.status === 'failed' && localClip.errorMessage && (
+        <div className="mt-3 bg-red-500/10 border border-red-500/30 rounded-xl p-3 flex flex-col shadow-inner">
+          <span className="text-red-400 font-bold text-xs uppercase tracking-wider mb-1">Gagal Diproses</span>
+          <span className="text-red-300 text-xs font-medium leading-relaxed">{localClip.errorMessage}</span>
+        </div>
+      )}
       
       <div className="mt-4 flex flex-col sm:flex-row items-start sm:items-center gap-3">
         <div className="inline-flex items-center gap-2 bg-slate-900/80 text-slate-300 px-3 py-1.5 rounded-lg text-sm font-mono border border-slate-700 shadow-inner">

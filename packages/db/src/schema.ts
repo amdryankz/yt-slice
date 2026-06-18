@@ -8,6 +8,7 @@ export const podcasts = pgTable('podcasts', {
   transcript: text('transcript'),
   durationSeconds: integer('duration_seconds'),
   status: text('status').default('processing').notNull(),
+  errorMessage: text('error_message'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
@@ -23,5 +24,6 @@ export const clips = pgTable('clips', {
   explanation: text('explanation'),
   caption: text('caption'),
   status: text('status').default('draft').notNull(),
+  errorMessage: text('error_message'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });

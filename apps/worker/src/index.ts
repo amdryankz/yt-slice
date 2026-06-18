@@ -265,20 +265,23 @@ worker.on('failed', async (job, err) => {
   
   if (!job) return;
 
+  const errorMessage = err.message || 'Unknown error occurred';
+
   try {
     if (job.name === 'process-video') {
       const { podcastId } = job.data as VideoJobPayload;
-      await db.update(podcasts).set({ status: 'failed' }).where(eq(podcasts.id, podcastId));
+      await db.update(podcasts).set({ status: 'failed', errorMessage }).where(eq(podcasts.id, podcastId));
       await redisPublisher.publish(`podcast_events_${podcastId}`, JSON.stringify({ type: 'REFRESH_CLIPS' }));
     } else if (job.name === 'regenerate-clips') {
       const { podcastId } = job.data as RegenerateJobPayload;
-      // Beritahu UI untuk berhenti loading (tanpa mengubah status podcast menjadi failed karena podcastnya sendiri sukses)
+      // We can also save the error to the podcast for regeneration failures
+      await db.update(podcasts).set({ status: 'failed', errorMessage }).where(eq(podcasts.id, podcastId));
       await redisPublisher.publish(`podcast_events_${podcastId}`, JSON.stringify({ type: 'REFRESH_CLIPS' }));
     } else if (job.name === 'cut-clip') {
       const { clipId } = job.data as CutClipJobPayload;
       const clip = await db.query.clips.findFirst({ where: eq(clips.id, clipId) });
       if (clip && clip.podcastId) {
-        await db.update(clips).set({ status: 'failed' }).where(eq(clips.id, clipId));
+        await db.update(clips).set({ status: 'failed', errorMessage }).where(eq(clips.id, clipId));
         await redisPublisher.publish(`podcast_events_${clip.podcastId}`, JSON.stringify({ type: 'REFRESH_CLIPS' }));
       }
     }

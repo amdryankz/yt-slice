@@ -36,6 +36,8 @@ export async function cutVideoSegment(
       "deno",
       "--proxy",
       "http://krqhgqmx:uifephb7tjm2@31.59.20.176:6754",
+      "--extractor-args",
+      "youtube:client=ios",
       "-o",
       tempPath,
       "--",

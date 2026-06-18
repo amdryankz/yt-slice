@@ -14,6 +14,8 @@ export async function downloadAudio(url: string, workDir: string): Promise<strin
     'deno',
     '--proxy',
     'http://krqhgqmx:uifephb7tjm2@31.59.20.176:6754',
+    '--extractor-args',
+    'youtube:client=ios',
     '--output',
     outputPathTemplate,
     url,

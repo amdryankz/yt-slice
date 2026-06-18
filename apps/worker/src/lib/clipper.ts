@@ -32,8 +32,6 @@ export async function cutVideoSegment(
       "--download-sections",
       `*${startTime}-${endTime}`,
       "--force-keyframes-at-cuts",
-      "--extractor-args",
-      "youtube:player_client=android",
       "--js-runtimes",
       "node",
       "--cookies",

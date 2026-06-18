@@ -10,8 +10,6 @@ export async function downloadAudio(url: string, workDir: string): Promise<strin
     '--extract-audio',
     '--audio-format',
     'm4a',
-    '--extractor-args',
-    'youtube:player_client=android',
     '--js-runtimes',
     'node',
     '--cookies',

@@ -102,36 +102,56 @@ export async function cutVideoSegment(
       return `${hours}:${minutes}:${secs}.${centis}`
     }
 
-    const STOP_WORDS = new Set(['DI', 'KE', 'DARI', 'YANG', 'DAN', 'ATAU', 'UNTUK', 'PADA', 'INI', 'ITU', 'DENGAN', 'DALAM', 'ADALAH', 'KITA', 'KAMI', 'SAYA', 'DIA', 'MEREKA', 'AKU', 'KAMU', 'BISA', 'TIDAK', 'ADA', 'AKAN', 'TAPI', 'JUGA', 'SUDAH', 'SAJA'])
-
     type Phrase = {
       words: any[]
       start: number
       end: number
     }
 
+    const allWords = words.map((w: any) => ({ ...w }))
+    for (let i = 0; i < allWords.length - 1; i++) {
+      if (allWords[i].end > allWords[i + 1].start) {
+        allWords[i].end = allWords[i + 1].start
+      }
+    }
+
     function groupWords(
       words: any[],
-      minWords: number,
+      maxChars: number,
       maxWords: number,
       gapThreshold: number
     ): Phrase[] {
       const grouped: Phrase[] = []
       let current: any[] = []
+      let currentCharCount = 0
 
       for (let i = 0; i < words.length; i++) {
         const word = words[i]
-        const previous = current.at(-1)
-        
-        const isPunctuation = previous && /[.!?,:;]$/.test(previous.punctuated_word ?? "")
-        const isPause = previous && (word.start - previous.end > gapThreshold)
-        const isMax = current.length >= maxWords
-        
-        const previousWordClean = previous ? (previous.punctuated_word || previous.word).replace(/[.,!?]/g, "").toUpperCase() : ""
-        const isPreviousStopWord = STOP_WORDS.has(previousWordClean)
+        const cleanWord = (word.punctuated_word || word.word).replace(
+          /[.,!?]/g,
+          ""
+        )
 
-        const shouldBreak = isMax || 
-          (current.length >= minWords && !isPreviousStopWord && (isPunctuation || isPause))
+        if (
+          current.length > 0 &&
+          currentCharCount + cleanWord.length > maxChars
+        ) {
+          grouped.push({
+            words: current,
+            start: current[0].start,
+            end: current[current.length - 1].end,
+          })
+          current = []
+          currentCharCount = 0
+        }
+
+        const previous = current.at(-1)
+        const isPunctuation =
+          previous && /[.!?,:;]$/.test(previous.punctuated_word ?? "")
+        const isPause = previous && word.start - previous.end > gapThreshold
+        const isMaxWords = current.length >= maxWords
+
+        const shouldBreak = isMaxWords || isPunctuation || isPause
 
         if (shouldBreak && current.length > 0) {
           grouped.push({
@@ -140,9 +160,11 @@ export async function cutVideoSegment(
             end: current[current.length - 1].end,
           })
           current = []
+          currentCharCount = 0
         }
 
         current.push(word)
+        currentCharCount += cleanWord.length + 1
       }
 
       if (current.length > 0) {
@@ -156,11 +178,10 @@ export async function cutVideoSegment(
       return grouped
     }
 
-    const phrases = groupWords(words, 2, 6, 0.5)
+    const phrases = groupWords(allWords, 20, 5, 0.4)
 
     // Calculate Y position based on format to avoid TikTok UI
-    // In ASS with Alignment 2, \pos(x,y) anchors the bottom-center of the text to (x,y)
-    const posY = (format === "crop" || format === "blur") ? 1450 : 1800
+    const posY = format === "crop" || format === "blur" ? 1450 : 1800
 
     const assHeader = `[Script Info]
 ScriptType: v4.00+
@@ -171,40 +192,51 @@ WrapStyle: 1
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Impact,65,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,8,4,2,80,80,0,1
-Style: Watermark,Arial,35,&H50FFFFFF,&H000000FF,&H50000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,8,40,40,150,1
+Style: Default,Impact,60,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,8,4,2,80,80,0,1
+Style: Watermark,Arial,25,&H50FFFFFF,&H000000FF,&H50000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,8,40,40,150,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `
 
     const assEvents = phrases
-      .flatMap((phrase) => {
+      .flatMap((phrase, pIndex) => {
+        const nextPhrase = phrases[pIndex + 1]
+        const absolutePhraseEnd = nextPhrase
+          ? nextPhrase.start
+          : phrase.words[phrase.words.length - 1].end + 0.5
+
         return phrase.words.map((activeWord, activeIndex) => {
-          const start = formatAssTime(activeWord.start)
-          
-          const endSeconds =
+          let startSeconds = activeWord.start
+
+          let endSeconds =
             activeIndex < phrase.words.length - 1
               ? phrase.words[activeIndex + 1].start
-              : activeWord.end + 0.1
+              : Math.min(activeWord.end + 0.1, absolutePhraseEnd)
+
+          if (startSeconds >= endSeconds) {
+            endSeconds = startSeconds + 0.1
+          }
+
+          const start = formatAssTime(startSeconds)
           const end = formatAssTime(endSeconds)
 
           let text = phrase.words
             .map((w, wIndex) => {
-              const rawWord = (w.punctuated_word || w.word).replace(/[.,!?]/g, "")
+              const rawWord = (w.punctuated_word || w.word).replace(
+                /[.,!?]/g,
+                ""
+              )
               const cleanWord = sanitizeText(rawWord).toUpperCase()
-              
+
               if (wIndex === activeIndex) {
-                const isStopWord = STOP_WORDS.has(cleanWord)
-                const colorTag = isStopWord ? `{\\c&HFFFFFF&}` : `{\\c&H00FFFF&}`
-                return `${colorTag}${cleanWord}{\\r}`
+                return `{\\c&H00FFFF&}${cleanWord}{\\c&HFFFFFF&}`
               }
               return cleanWord
             })
             .join(" ")
 
           // Force absolute positioning to completely disable libass collision stacking
-          // \an2 anchors the bottom-center of the text to the given (x,y)
           text = `{\\an2\\pos(540,${posY})}${text}`
 
           return `Dialogue: 0,${start},${end},Default,,0,0,0,,${text}`

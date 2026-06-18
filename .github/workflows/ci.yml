@@ -25,10 +25,8 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
+      - name: Setup dummy environment variables
+        run: cp .env.example .env
+
       - name: Build Web
         run: bun run build
-        env:
-          # You might need to set dummy env variables if Next.js requires them during build
-          DATABASE_URL: "postgresql://dummy"
-          DEEPGRAM_API_KEY: "dummy"
-          GEMINI_API_KEY: "dummy"

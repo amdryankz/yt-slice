@@ -6,37 +6,48 @@ export async function downloadAudio(url: string, workDir: string): Promise<strin
   // Since we force m4a format, the final file will be named audio.m4a
   const expectedFinalPath = join(workDir, 'audio.m4a');
 
-  const proc = Bun.spawn([
-    'yt-dlp',
-    '--extract-audio',
-    '--audio-format',
-    'm4a',
-    '--js-runtimes',
-    'deno',
-    '--proxy',
-    getRandomProxy(),
-    '--extractor-args',
-    'youtube:client=ios',
-    '--output',
-    outputPathTemplate,
-    url,
-  ], {
-    cwd: workDir,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
+  let lastError = '';
+  
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const proxy = getRandomProxy();
+    console.log(`[Audio Download] Attempt ${attempt}/3 using proxy: ${proxy.split('@')[1] || proxy}`);
+    
+    const proc = Bun.spawn([
+      'yt-dlp',
+      '--extract-audio',
+      '--audio-format',
+      'm4a',
+      '--js-runtimes',
+      'deno',
+      '--proxy',
+      proxy,
+      '--extractor-args',
+      'youtube:client=ios',
+      '--output',
+      outputPathTemplate,
+      url,
+    ], {
+      cwd: workDir,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
 
-  const exitCode = await proc.exited;
+    const text = await new Response(proc.stderr).text();
+    const exitCode = await proc.exited;
 
-  if (exitCode !== 0) {
-    const errorText = await new Response(proc.stderr).text();
-    throw new Error(`yt-dlp failed with exit code ${exitCode}. Error: ${errorText}`);
+    if (exitCode === 0) {
+      // Drain stdout to prevent memory leaks if it gets large
+      await new Response(proc.stdout).text();
+      return expectedFinalPath;
+    }
+    
+    lastError = text;
+    console.warn(`[Audio Download] Attempt ${attempt} failed.`);
+    // Drain stdout to prevent memory leaks if it gets large
+    await new Response(proc.stdout).text();
   }
 
-  // Drain stdout to prevent memory leaks if it gets large
-  await new Response(proc.stdout).text();
-
-  return expectedFinalPath;
+  throw new Error(`yt-dlp audio download failed after 3 attempts. Last Error: ${lastError}`);
 }
 
 export async function getAudioDuration(audioPath: string): Promise<number> {

@@ -27,39 +27,60 @@ export async function cutVideoSegment(
     [
       "yt-dlp",
       "-f",
-      "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4",
-      "--merge-output-format",
-      "mp4",
-      "--download-sections",
-      `*${startTime}-${endTime}`,
-      "--force-keyframes-at-cuts",
-      "--js-runtimes",
-      "deno",
-      "--proxy",
-      getRandomProxy(),
-      "--extractor-args",
-      "youtube:client=ios",
-      "-o",
-      tempPath,
-      "--",
-      url,
-    ],
-    {
-      stdout: "pipe",
-      stderr: "pipe",
-    }
-  )
-
-  const ytDlpExitCode = await ytDlpProc.exited
-
-  if (ytDlpExitCode !== 0) {
-    const errorText = await new Response(ytDlpProc.stderr).text()
-    throw new Error(
-      `yt-dlp clip cut failed with exit code ${ytDlpExitCode}. Error: ${errorText}`
+  let lastError = '';
+  let success = false;
+  
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const proxy = getRandomProxy();
+    console.log(`[Video Cut] Attempt ${attempt}/3 using proxy: ${proxy.split('@')[1] || proxy}`);
+    
+    const proc = Bun.spawn(
+      [
+        "yt-dlp",
+        "--proxy",
+        proxy,
+        "--extractor-args",
+        "youtube:client=ios",
+        "--download-sections",
+        `*${startTime}-${endTime}`,
+        "--force-keyframes-at-cuts",
+        "-S",
+        "res:1080,ext:mp4:m4a",
+        "-o",
+        tempPath,
+        url,
+      ],
+      {
+        stderr: "pipe",
+        stdout: "pipe",
+      }
     )
+
+    const errorText = await new Response(proc.stderr).text()
+    const exitCode = await proc.exited
+
+    // Drain stdout to prevent memory leaks if it gets large
+    await new Response(proc.stdout).text();
+
+    if (exitCode === 0) {
+      success = true;
+      break;
+    }
+    
+    lastError = errorText;
+    console.warn(`[Video Cut] Attempt ${attempt} failed.`);
+    
+    // Remove temp path just in case yt-dlp left partial files before retrying
+    await fs.unlink(tempPath).catch(() => {});
+    await fs.unlink(`${tempPath}.part`).catch(() => {});
+    await fs.unlink(`${tempPath}.ytdl`).catch(() => {});
   }
 
-  await new Response(ytDlpProc.stdout).text() // Drain stdout
+  if (!success) {
+    throw new Error(
+      `yt-dlp clip cut failed after 3 attempts. Last Error: ${lastError}`
+    )
+  }
 
   console.log(`[Clipper] Generating subtitles via Deepgram for the segment...`)
   try {

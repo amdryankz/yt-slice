@@ -35,9 +35,9 @@ export default async function Dashboard() {
           ) : (
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               {allPodcasts.map((podcast) => (
-                <div key={podcast.id} className="bg-slate-900/50 border border-slate-700 p-5 rounded-2xl flex flex-col justify-between hover:border-purple-500/50 transition-colors">
-                  <div>
-                    <h3 className="font-semibold text-lg text-slate-100 line-clamp-1" title={podcast.title}>
+                <div key={podcast.id} className="bg-slate-900/50 border border-slate-700 p-5 rounded-2xl flex flex-col justify-between hover:border-purple-500/50 transition-colors min-w-0">
+                  <div className="min-w-0">
+                    <h3 className="font-semibold text-lg text-slate-100 truncate" title={podcast.title}>
                       {podcast.title}
                     </h3>
                     <div className="flex items-center gap-2 mt-2 text-sm">

@@ -15,20 +15,20 @@ export default async function Dashboard() {
       <div className="absolute top-1/4 left-1/4 w-[500px] h-[500px] bg-purple-600/30 rounded-full blur-[120px] pointer-events-none" />
       <div className="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] bg-blue-600/20 rounded-full blur-[100px] pointer-events-none" />
 
-      <main className="z-10 w-full max-w-5xl mt-12">
-        <div className="text-center mb-10">
-          <h1 className="text-5xl font-extrabold tracking-tight bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
+      <main className="z-10 w-full max-w-5xl mt-6 sm:mt-12">
+        <div className="text-center mb-8 sm:mb-10">
+          <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
             Clip AI
           </h1>
-          <p className="mt-4 text-lg text-slate-400">
+          <p className="mt-3 sm:mt-4 text-base sm:text-lg text-slate-400 max-w-xl mx-auto">
             Submit a podcast or video URL to automatically generate viral clips.
           </p>
         </div>
 
         <PodcastForm />
 
-        <div className="w-full bg-white/5 border border-white/10 backdrop-blur-xl p-8 rounded-3xl shadow-2xl">
-          <h2 className="text-2xl font-bold mb-6 text-slate-100">Recent Projects</h2>
+        <div className="w-full bg-white/5 border border-white/10 backdrop-blur-xl p-5 sm:p-8 rounded-3xl shadow-2xl">
+          <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6 text-slate-100">Recent Projects</h2>
           
           {allPodcasts.length === 0 ? (
             <p className="text-slate-400 text-center py-8">No podcasts submitted yet.</p>

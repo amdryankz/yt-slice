@@ -47,9 +47,9 @@ export default function PodcastForm() {
   }
 
   return (
-    <div className="bg-white/5 border border-white/10 backdrop-blur-xl p-8 rounded-3xl shadow-2xl transition-all duration-300 hover:shadow-purple-500/10 w-full max-w-xl mx-auto mb-16">
-      <form onSubmit={handleSubmit} className="flex flex-col gap-6">
-        <div className="flex flex-col gap-2">
+    <div className="bg-white/5 border border-white/10 backdrop-blur-xl p-5 sm:p-8 rounded-3xl shadow-2xl transition-all duration-300 hover:shadow-purple-500/10 w-full max-w-xl mx-auto mb-10 sm:mb-16">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4 sm:gap-6">
+        <div className="flex flex-col gap-1.5 sm:gap-2">
           <label htmlFor="title" className="text-sm font-medium text-slate-300 ml-1">
             Project Title
           </label>

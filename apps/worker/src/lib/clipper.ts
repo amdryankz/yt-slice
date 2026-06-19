@@ -23,10 +23,6 @@ export async function cutVideoSegment(
 
   console.log(`[Clipper] Downloading raw segment to ${tempPath}`)
 
-  const ytDlpProc = Bun.spawn(
-    [
-      "yt-dlp",
-      "-f",
   let lastError = '';
   let success = false;
   

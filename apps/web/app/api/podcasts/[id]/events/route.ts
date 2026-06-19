@@ -10,7 +10,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
   // Create a dedicated subscriber for this SSE connection
   const subscriber = new Redis(connection);
-  subscriber.on('error', (err) => {
+  subscriber.on('error', (err: any) => {
+    if (err.message && err.message.includes('EPIPE')) return;
     console.error(`[ioredis SSE] Error in podcast ${id}:`, err.message);
   });
   await subscriber.subscribe(channel);

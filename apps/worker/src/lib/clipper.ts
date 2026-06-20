@@ -307,14 +307,27 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       )
     }
 
-    // Re-encode video with subtitles, convert audio to AAC, ensure yuv420p for web compatibility
+    // Optimize video for TikTok/Shorts:
+    // - Force 60fps (-r 60) for smoothness
+    // - Use High profile (-profile:v high) and CRF 18 for visually lossless quality to survive TikTok's compression
+    // - Preset fast for good encoding speed vs compression ratio
     ffmpegArgs.push(
       "-c:v",
       "libx264",
+      "-profile:v",
+      "high",
+      "-crf",
+      "18",
+      "-preset",
+      "fast",
+      "-r",
+      "60",
       "-pix_fmt",
       "yuv420p",
       "-c:a",
       "aac",
+      "-b:a",
+      "192k",
       "-movflags",
       "+faststart",
       outBasename

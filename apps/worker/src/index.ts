@@ -168,7 +168,8 @@ const worker = new Worker(
         console.log(`[Job ${job.id}] Cut successful! Generating thumbnail...`);
         const thumbnailPath = `${outputPath}.thumb.jpg`;
         const thumbFileName = `clip-${clip.id}-thumb.jpg`;
-        await generateThumbnail(outputPath, thumbnailPath, clip.title);
+        // Pass the raw video (.tmp.mp4) before subtitles are added, and pass the format
+        await generateThumbnail(`${outputPath}.tmp.mp4`, thumbnailPath, clip.title, format as any);
         
         console.log(`[Job ${job.id}] Uploading to S3...`);
         

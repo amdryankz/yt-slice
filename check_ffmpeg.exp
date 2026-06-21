@@ -1,6 +1,0 @@
-#!/usr/bin/expect -f
-set timeout -1
-spawn ssh -p 22 root@213.136.64.179 "ffmpeg -filters | grep drawtext || echo 'no drawtext'"
-expect "password:"
-send "3R5bdC0G\r"
-expect eof

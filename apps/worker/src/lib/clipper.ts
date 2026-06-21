@@ -354,12 +354,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     await new Response(ffmpegProc.stdout).text() // Drain stdout
   } finally {
-    console.log(`[Clipper] Cleaning up temporary files...`)
-    await fs
-      .unlink(tempPath)
-      .catch((err) =>
-        console.warn(`[Clipper] Failed to delete ${tempPath}:`, err)
-      )
+    console.log(`[Clipper] Cleaning up temporary subtitles...`)
     await fs
       .unlink(srtPath)
       .catch((err) =>
@@ -368,29 +363,65 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   }
 }
 
-export async function generateThumbnail(videoPath: string, outputPath: string, title: string) {
+function wrapText(text: string, maxLen: number) {
+  const words = text.split(' ');
+  let lines = [];
+  let currentLine = '';
+  for (const word of words) {
+    if ((currentLine + word).length > maxLen) {
+      if (currentLine) lines.push(currentLine.trim());
+      currentLine = word + ' ';
+    } else {
+      currentLine += word + ' ';
+    }
+  }
+  if (currentLine) lines.push(currentLine.trim());
+  return lines.join('\\n'); // FFmpeg drawtext expects \\n for newlines in a textfile
+}
+
+export async function generateThumbnail(videoPath: string, outputPath: string, title: string, format: "original" | "crop" | "blur" = "original") {
   const cwd = path.dirname(videoPath);
   const titlePath = `${outputPath}.title.txt`;
   
   try {
-    // Write title to a temporary file to avoid complex shell escaping in FFmpeg
+    // Write word-wrapped title to a temporary file
     // Convert to uppercase for TikTok style
-    await fs.writeFile(titlePath, title.toUpperCase(), 'utf-8');
+    const wrappedTitle = wrapText(title.toUpperCase(), 16);
+    await fs.writeFile(titlePath, wrappedTitle, 'utf-8');
 
     // Use system ffmpeg instead of ffmpeg-static because ffmpeg-static lacks the 'drawtext' filter (no Freetype support)
     const ffmpegPath = "ffmpeg";
 
-    // FFmpeg arguments to extract a frame at 0.5s and overlay centered yellow text with black background
+    let filterGraph = "";
+    
+    // Apply the same video format scaling as the main video
+    if (format === "crop") {
+      filterGraph += "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,";
+    } else if (format === "blur") {
+      filterGraph += "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=20:20[bg];[0:v]scale=1080:1920:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,";
+    }
+
+    // Add drawtext with thick border (stroke) and line spacing
+    filterGraph += `drawtext=textfile='${titlePath}':fontcolor=yellow:fontsize=110:borderw=10:bordercolor=black:line_spacing=20:x=(w-text_w)/2:y=(h-text_h)/2`;
+
     const ffmpegArgs = [
-      ffmpegPath as string,
+      ffmpegPath,
       "-y",
       "-ss", "00:00:00.500", // Extract at 0.5 seconds
       "-i", videoPath,
       "-vframes", "1",
-      "-vf", `drawtext=textfile='${titlePath}':fontcolor=yellow:fontsize=80:x=(w-text_w)/2:y=(h-text_h)/2:box=1:boxcolor=black@0.6:boxborderw=20`,
+    ];
+
+    if (format === "blur") {
+      ffmpegArgs.push("-filter_complex", filterGraph);
+    } else {
+      ffmpegArgs.push("-vf", filterGraph);
+    }
+
+    ffmpegArgs.push(
       "-q:v", "2", // High quality JPEG
       outputPath
-    ];
+    );
 
     const proc = Bun.spawn(ffmpegArgs, { cwd, stdout: "pipe", stderr: "pipe" });
     const exitCode = await proc.exited;

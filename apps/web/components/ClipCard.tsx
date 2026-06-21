@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Flame, Edit2, Download, Copy, Check, Loader2, Play, MousePointer2, Trash2 } from "lucide-react";
+import { Flame, Edit2, Download, Copy, Check, Loader2, Play, MousePointer2, Trash2, ImageIcon } from "lucide-react";
 import toast from "react-hot-toast";
 import {
   AlertDialog,
@@ -236,7 +236,27 @@ export default function ClipCard({ clip: initialClip, index, playerRef, playedSe
       </div>
 
       {localClip.status === 'completed' && localClip.clipPath ? (
-        <video controls className="w-full rounded-2xl mt-6 border border-white/10" src={`/api/clips/${localClip.id}/video`} />
+        <div className="mt-6 flex flex-col gap-4">
+          <video controls className="w-full rounded-2xl border border-white/10" src={`/api/clips/${localClip.id}/video`} />
+          <div className="flex flex-col sm:flex-row gap-3">
+            <a 
+              href={localClip.clipPath} 
+              target="_blank" 
+              className="flex-1 text-center bg-blue-600/80 hover:bg-blue-600 text-white py-3 rounded-xl font-semibold transition-all flex items-center justify-center gap-2 text-sm"
+            >
+              <Download className="w-4 h-4" /> Download Video
+            </a>
+            {localClip.thumbnailPath && (
+              <a 
+                href={localClip.thumbnailPath} 
+                target="_blank" 
+                className="flex-1 text-center bg-yellow-500/80 hover:bg-yellow-500 text-slate-900 py-3 rounded-xl font-bold transition-all flex items-center justify-center gap-2 text-sm"
+              >
+                <ImageIcon className="w-4 h-4" /> Download Thumb
+              </a>
+            )}
+          </div>
+        </div>
       ) : (
         <div className="mt-6 flex flex-col gap-3 mt-auto pt-2">
           

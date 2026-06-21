@@ -363,3 +363,40 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       )
   }
 }
+
+export async function generateThumbnail(videoPath: string, outputPath: string, title: string) {
+  const cwd = path.dirname(videoPath);
+  const titlePath = `${outputPath}.title.txt`;
+  
+  try {
+    // Write title to a temporary file to avoid complex shell escaping in FFmpeg
+    // Convert to uppercase for TikTok style
+    await fs.writeFile(titlePath, title.toUpperCase(), 'utf-8');
+
+    const ffmpegModule = await import("ffmpeg-static");
+    const ffmpegPath = ffmpegModule.default || ffmpegModule;
+
+    // FFmpeg arguments to extract a frame at 0.5s and overlay centered yellow text with black background
+    const ffmpegArgs = [
+      ffmpegPath as string,
+      "-y",
+      "-ss", "00:00:00.500", // Extract at 0.5 seconds
+      "-i", videoPath,
+      "-vframes", "1",
+      "-vf", `drawtext=textfile='${titlePath}':fontcolor=yellow:fontsize=80:x=(w-text_w)/2:y=(h-text_h)/2:box=1:boxcolor=black@0.6:boxborderw=20`,
+      "-q:v", "2", // High quality JPEG
+      outputPath
+    ];
+
+    const proc = Bun.spawn(ffmpegArgs, { cwd, stdout: "pipe", stderr: "pipe" });
+    const exitCode = await proc.exited;
+
+    if (exitCode !== 0) {
+      const errorText = await new Response(proc.stderr).text();
+      throw new Error(`Thumbnail generation failed: ${errorText}`);
+    }
+  } finally {
+    // Cleanup temporary title file
+    await fs.unlink(titlePath).catch(() => {});
+  }
+}

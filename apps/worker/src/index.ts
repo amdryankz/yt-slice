@@ -9,7 +9,7 @@ import { eq, lt, or, and } from 'drizzle-orm';
 import { downloadAudio, getAudioDuration } from './lib/downloader';
 import { transcribeAudio } from './lib/transcriber';
 import { analyzeTranscript } from './lib/gemini';
-import { cutVideoSegment } from './lib/clipper';
+import { cutVideoSegment, generateThumbnail } from './lib/clipper';
 import { uploadFile } from './lib/storage';
 
 if (!process.env.DEEPGRAM_API_KEY) {
@@ -165,14 +165,20 @@ const worker = new Worker(
         
         await cutVideoSegment(podcast.sourceUrl, clip.startTime, clip.endTime, outputPath, format as any, watermarkText);
         
-        console.log(`[Job ${job.id}] Cut successful! Uploading to S3...`);
+        console.log(`[Job ${job.id}] Cut successful! Generating thumbnail...`);
+        const thumbnailPath = `${outputPath}.thumb.jpg`;
+        const thumbFileName = `clip-${clip.id}-thumb.jpg`;
+        await generateThumbnail(outputPath, thumbnailPath, clip.title);
+        
+        console.log(`[Job ${job.id}] Uploading to S3...`);
         
         const publicUrl = await uploadFile(outputPath, fileName);
+        const thumbPublicUrl = await uploadFile(thumbnailPath, thumbFileName);
         console.log(`[Job ${job.id}] Upload successful: ${publicUrl}`);
         
         await db
           .update(clips)
-          .set({ status: 'completed', clipPath: publicUrl })
+          .set({ status: 'completed', clipPath: publicUrl, thumbnailPath: thumbPublicUrl })
           .where(eq(clips.id, clipId));
           
         if (podcastIdToNotify) {
@@ -181,10 +187,11 @@ const worker = new Worker(
           
         // Cleanup temp files
         await fs.unlink(outputPath).catch(() => {});
+        await fs.unlink(thumbnailPath).catch(() => {});
         await fs.unlink(`${outputPath}.tmp.mp4`).catch(() => {});
         await fs.unlink(`${outputPath}.tmp.ass`).catch(() => {});
           
-        return { success: true, clipPath: publicUrl };
+        return { success: true, clipPath: publicUrl, thumbnailPath: thumbPublicUrl };
       } catch (error: any) {
         console.error(`[Job ${job.id}] Failed to cut clip:`, error);
         

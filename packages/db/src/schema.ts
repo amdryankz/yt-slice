@@ -20,6 +20,7 @@ export const clips = pgTable('clips', {
   startTime: integer('start_time').notNull(),
   endTime: integer('end_time').notNull(),
   clipPath: text('clip_path'),
+  thumbnailPath: text('thumbnail_path'),
   viralityScore: integer('virality_score'),
   explanation: text('explanation'),
   caption: text('caption'),

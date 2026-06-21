@@ -376,7 +376,7 @@ function wrapText(text: string, maxLen: number) {
     }
   }
   if (currentLine) lines.push(currentLine.trim());
-  return lines.join('\\n'); // FFmpeg drawtext expects \\n for newlines in a textfile
+  return lines.join('\n'); // Write actual newline characters to the file
 }
 
 export async function generateThumbnail(videoPath: string, outputPath: string, title: string, format: "original" | "crop" | "blur" = "original") {

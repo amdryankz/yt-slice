@@ -1,14 +1,14 @@
 export const proxies = [
-  "http://krqhgqmx:uifephb7tjm2@31.59.20.176:6754",
-  "http://krqhgqmx:uifephb7tjm2@92.113.242.158:6742",
-  "http://krqhgqmx:uifephb7tjm2@38.154.203.95:5863",
-  "http://krqhgqmx:uifephb7tjm2@198.105.121.200:6462",
-  "http://krqhgqmx:uifephb7tjm2@64.137.96.74:6641",
-  "http://krqhgqmx:uifephb7tjm2@38.154.185.97:6370",
-  "http://krqhgqmx:uifephb7tjm2@142.111.67.146:5611",
-  "http://krqhgqmx:uifephb7tjm2@191.96.254.138:6185",
-  "http://krqhgqmx:uifephb7tjm2@23.229.19.94:8689",
-  "http://krqhgqmx:uifephb7tjm2@2.57.20.2:6983"
+  "http://ggzcmfnt:dtm8nm5zxsdm@31.59.20.176:6754",
+  "http://ggzcmfnt:dtm8nm5zxsdm@31.56.127.193:7684",
+  "http://ggzcmfnt:dtm8nm5zxsdm@45.38.107.97:6014",
+  "http://ggzcmfnt:dtm8nm5zxsdm@38.154.203.95:5863",
+  "http://ggzcmfnt:dtm8nm5zxsdm@198.105.121.200:6462",
+  "http://ggzcmfnt:dtm8nm5zxsdm@64.137.96.74:6641",
+  "http://ggzcmfnt:dtm8nm5zxsdm@198.23.243.226:6361",
+  "http://ggzcmfnt:dtm8nm5zxsdm@38.154.185.97:6370",
+  "http://ggzcmfnt:dtm8nm5zxsdm@142.111.67.146:5611",
+  "http://ggzcmfnt:dtm8nm5zxsdm@191.96.254.138:6185"
 ];
 
 export function getRandomProxy(): string {

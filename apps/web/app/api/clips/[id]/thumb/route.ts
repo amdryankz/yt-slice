@@ -23,12 +23,12 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
       where: eq(clips.id, clipId),
     });
 
-    if (!clip || !clip.clipPath) {
-      return new NextResponse('Clip not found or not rendered', { status: 404 });
+    if (!clip || !clip.thumbnailPath) {
+      return new NextResponse('Thumbnail not found or not rendered', { status: 404 });
     }
 
-    // Extract filename from the public URL (e.g. https://pub-....r2.dev/clip-uuid.mp4)
-    const key = clip.clipPath.split('/').pop();
+    // Extract filename from the public URL (e.g. https://pub-....r2.dev/clip-uuid-thumb.jpg)
+    const key = clip.thumbnailPath.split('/').pop();
     if (!key) {
       return new NextResponse('Invalid clip path', { status: 400 });
     }

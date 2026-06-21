@@ -240,7 +240,7 @@ export default function ClipCard({ clip: initialClip, index, playerRef, playedSe
           <video controls className="w-full rounded-2xl border border-white/10" src={`/api/clips/${localClip.id}/video`} />
           <div className="flex flex-col sm:flex-row gap-3">
             <a 
-              href={localClip.clipPath} 
+              href={`/api/clips/${localClip.id}/video?download=1`} 
               target="_blank" 
               className="flex-1 text-center bg-blue-600/80 hover:bg-blue-600 text-white py-3 rounded-xl font-semibold transition-all flex items-center justify-center gap-2 text-sm"
             >
@@ -248,7 +248,7 @@ export default function ClipCard({ clip: initialClip, index, playerRef, playedSe
             </a>
             {localClip.thumbnailPath && (
               <a 
-                href={localClip.thumbnailPath} 
+                href={`/api/clips/${localClip.id}/thumb?download=1`} 
                 target="_blank" 
                 className="flex-1 text-center bg-yellow-500/80 hover:bg-yellow-500 text-slate-900 py-3 rounded-xl font-bold transition-all flex items-center justify-center gap-2 text-sm"
               >

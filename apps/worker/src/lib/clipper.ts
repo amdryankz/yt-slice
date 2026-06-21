@@ -309,15 +309,19 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     // Optimize video for TikTok/Shorts:
     // - Force 60fps (-r 60) for smoothness
-    // - Use High profile (-profile:v high) and CRF 18 for visually lossless quality to survive TikTok's compression
+    // - Force Constant Bitrate (CBR) of 8 Mbps to trick TikTok's algorithm into seeing it as high-quality
     // - Preset fast for good encoding speed vs compression ratio
     ffmpegArgs.push(
       "-c:v",
       "libx264",
       "-profile:v",
       "high",
-      "-crf",
-      "18",
+      "-b:v",
+      "8M",
+      "-maxrate",
+      "8M",
+      "-bufsize",
+      "8M",
       "-preset",
       "fast",
       "-r",

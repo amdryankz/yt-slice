@@ -76,10 +76,27 @@ export default function ClipCard({ clip: initialClip, index, playerRef, playedSe
   }
 
   async function handleCopyCaption() {
-    await navigator.clipboard.writeText(localClip.caption);
-    setCopied(true);
-    toast.success('Caption disalin ke clipboard');
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(localClip.caption);
+      } else {
+        // Fallback for HTTP environments
+        const textArea = document.createElement("textarea");
+        textArea.value = localClip.caption;
+        textArea.style.position = "absolute";
+        textArea.style.left = "-999999px";
+        document.body.prepend(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        textArea.remove();
+      }
+      setCopied(true);
+      toast.success('Caption disalin ke clipboard');
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error(err);
+      toast.error('Gagal menyalin caption');
+    }
   }
 
   async function handleSaveEdits() {

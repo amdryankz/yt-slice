@@ -1,0 +1,6 @@
+#!/usr/bin/expect -f
+set timeout -1
+spawn ssh -p 22 root@213.136.64.179 "pm2 logs clipper-worker --lines 50 --nostream"
+expect "password:"
+send "3R5bdC0G\r"
+expect eof

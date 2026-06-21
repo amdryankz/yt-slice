@@ -377,8 +377,8 @@ export async function generateThumbnail(videoPath: string, outputPath: string, t
     // Convert to uppercase for TikTok style
     await fs.writeFile(titlePath, title.toUpperCase(), 'utf-8');
 
-    const ffmpegModule = await import("ffmpeg-static");
-    const ffmpegPath = ffmpegModule.default || ffmpegModule;
+    // Use system ffmpeg instead of ffmpeg-static because ffmpeg-static lacks the 'drawtext' filter (no Freetype support)
+    const ffmpegPath = "ffmpeg";
 
     // FFmpeg arguments to extract a frame at 0.5s and overlay centered yellow text with black background
     const ffmpegArgs = [

@@ -132,6 +132,17 @@ export async function cutVideoSegment(
       }
     }
 
+    function fixReduplication(value: string) {
+      // Find exactly repeated substrings (length >= 4) to fix missing hyphens
+      // e.g., kawankawan -> kawan-kawan, samasama -> sama-sama
+      // Also preserves any trailing punctuation
+      const match = value.match(/^([a-zA-Z]{4,})\1([.,!?]*)$/i);
+      if (match) {
+        return `${match[1]}-${match[1]}${match[2]}`;
+      }
+      return value;
+    }
+
     function groupWords(
       words: any[],
       maxChars: number,
@@ -144,10 +155,7 @@ export async function cutVideoSegment(
 
       for (let i = 0; i < words.length; i++) {
         const word = words[i]
-        const cleanWord = (word.punctuated_word || word.word).replace(
-          /[.,!?]/g,
-          ""
-        )
+        const cleanWord = fixReduplication(word.punctuated_word || word.word)
 
         if (
           current.length > 0 &&
@@ -240,10 +248,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
           let text = phrase.words
             .map((w, wIndex) => {
-              const rawWord = (w.punctuated_word || w.word).replace(
-                /[.,!?]/g,
-                ""
-              )
+              const rawWord = fixReduplication(w.punctuated_word || w.word)
               const cleanWord = sanitizeText(rawWord).toUpperCase()
 
               if (wIndex === activeIndex) {

@@ -384,9 +384,13 @@ export async function generateThumbnail(videoPath: string, outputPath: string, t
   const titlePath = `${outputPath}.title.txt`;
   
   try {
+    // Dynamic settings based on format
+    const maxLen = format === "original" ? 25 : 12;
+    const fontSize = format === "original" ? 140 : 100;
+
     // Write word-wrapped title to a temporary file
     // Convert to uppercase for TikTok style
-    const wrappedTitle = wrapText(title.toUpperCase(), 16);
+    const wrappedTitle = wrapText(title.toUpperCase(), maxLen);
     await fs.writeFile(titlePath, wrappedTitle, 'utf-8');
 
     // Use system ffmpeg instead of ffmpeg-static because ffmpeg-static lacks the 'drawtext' filter (no Freetype support)
@@ -401,8 +405,11 @@ export async function generateThumbnail(videoPath: string, outputPath: string, t
       filterGraph += "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=20:20[bg];[0:v]scale=1080:1920:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,";
     }
 
-    // Add drawtext with thick border (stroke) and line spacing
-    filterGraph += `drawtext=textfile='${titlePath}':fontcolor=yellow:fontsize=110:borderw=10:bordercolor=black:line_spacing=20:x=(w-text_w)/2:y=(h-text_h)/2`;
+    // Visual Enhancements: Color correction and vignette
+    filterGraph += "eq=contrast=1.05:saturation=1.3,vignette=PI/4,";
+
+    // Add drawtext with thick border (stroke), drop shadow, and line spacing
+    filterGraph += `drawtext=textfile='${titlePath}':fontcolor=yellow:fontsize=${fontSize}:borderw=10:bordercolor=black:shadowx=6:shadowy=6:shadowcolor=black@0.9:line_spacing=20:x=(w-text_w)/2:y=(h-text_h)/2`;
 
     const ffmpegArgs = [
       ffmpegPath,

@@ -26,6 +26,7 @@ export default function ClipCard({ clip: initialClip, index, playerRef, playedSe
   const [isCutting, setIsCutting] = useState(false);
   const [copied, setCopied] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [confirmCut, setConfirmCut] = useState(false);
   const [videoFormat, setVideoFormat] = useState<'original' | 'crop' | 'blur'>('original');
   const [editTitle, setEditTitle] = useState(initialClip.title);
   const [editCaption, setEditCaption] = useState(initialClip.caption);
@@ -313,32 +314,55 @@ export default function ClipCard({ clip: initialClip, index, playerRef, playedSe
           </div>
 
           <div className="flex items-center gap-3">
-            <button 
-              onClick={() => setIsEditing(!isEditing)}
-              disabled={localClip.status === 'processing' || isCutting}
-              className={`flex items-center justify-center gap-2 flex-1 border py-3 rounded-xl text-sm font-semibold transition-all ${
-                isEditing ? "bg-white/20 border-white/30 text-white" : "bg-white/5 border-white/10 hover:bg-white/10 text-slate-200"
-              }`}
-            >
-              <Edit2 className="w-4 h-4" /> {isEditing ? "Cancel Editing" : "Edit Clip"}
-            </button>
-            
-            <button 
-              onClick={handleCut}
-              disabled={localClip.status === 'processing' || isCutting}
-              className="flex items-center justify-center gap-2 flex-1 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-purple-500/25"
-            >
-              {localClip.status === 'processing' || isCutting ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" /> 
-                  Video is being cut...
-                </>
-              ) : (
-                <>
-                  <Download className="w-4 h-4" /> Cut Video
-                </>
-              )}
-            </button>
+            {confirmCut ? (
+              <>
+                <button 
+                  onClick={() => setConfirmCut(false)}
+                  disabled={localClip.status === 'processing' || isCutting}
+                  className="flex items-center justify-center gap-2 flex-1 bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 py-3 rounded-xl text-sm font-semibold transition-all"
+                >
+                  Batal
+                </button>
+                <button 
+                  onClick={() => {
+                    setConfirmCut(false);
+                    handleCut();
+                  }}
+                  disabled={localClip.status === 'processing' || isCutting}
+                  className="flex items-center justify-center gap-2 flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white py-3 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-emerald-500/25 animate-in fade-in zoom-in duration-200"
+                >
+                  {localClip.status === 'processing' || isCutting ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Memproses...</>
+                  ) : (
+                    <><Check className="w-4 h-4" /> Proses Sekarang</>
+                  )}
+                </button>
+              </>
+            ) : (
+              <>
+                <button 
+                  onClick={() => setIsEditing(!isEditing)}
+                  disabled={localClip.status === 'processing' || isCutting}
+                  className={`flex items-center justify-center gap-2 flex-1 border py-3 rounded-xl text-sm font-semibold transition-all ${
+                    isEditing ? "bg-white/20 border-white/30 text-white" : "bg-white/5 border-white/10 hover:bg-white/10 text-slate-200"
+                  }`}
+                >
+                  <Edit2 className="w-4 h-4" /> {isEditing ? "Selesai Edit" : "Edit Klip"}
+                </button>
+                
+                <button 
+                  onClick={() => setConfirmCut(true)}
+                  disabled={localClip.status === 'processing' || isCutting}
+                  className="flex items-center justify-center gap-2 flex-1 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-purple-500/25"
+                >
+                  {localClip.status === 'processing' || isCutting ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Memproses...</>
+                  ) : (
+                    <><Download className="w-4 h-4" /> Cut Video</>
+                  )}
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

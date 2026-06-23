@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Flame, Edit2, Download, Copy, Check, Loader2, Play, MousePointer2, Trash2, ImageIcon } from "lucide-react";
+import { Flame, Edit2, Download, Copy, Check, Loader2, Play, MousePointer2, Trash2, ImageIcon, X } from "lucide-react";
 import toast from "react-hot-toast";
 import {
   AlertDialog,
@@ -319,9 +319,9 @@ export default function ClipCard({ clip: initialClip, index, playerRef, playedSe
                 <button 
                   onClick={() => setConfirmCut(false)}
                   disabled={localClip.status === 'processing' || isCutting}
-                  className="flex items-center justify-center gap-2 flex-1 bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 py-3 rounded-xl text-sm font-semibold transition-all"
+                  className="flex items-center justify-center gap-2 flex-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 py-3 rounded-xl text-sm font-semibold transition-all animate-in fade-in zoom-in duration-200"
                 >
-                  Batal
+                  <X className="w-4 h-4" /> Batal
                 </button>
                 <button 
                   onClick={() => {

@@ -1,0 +1,1 @@
+ALTER TABLE "clips" ADD COLUMN "thumbnail_path" text;

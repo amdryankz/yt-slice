@@ -22,7 +22,7 @@ export async function downloadAudio(url: string, workDir: string): Promise<strin
       '--proxy',
       proxy,
       '--extractor-args',
-      'youtube:client=ios',
+      'youtube:player_client=android,web',
       '--output',
       outputPathTemplate,
       url,

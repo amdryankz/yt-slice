@@ -15,6 +15,13 @@
       "when": 1781781671385,
       "tag": "0001_flimsy_gabe_jones",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791275913083,
+      "tag": "0002_redundant_the_fury",
+      "breakpoints": true
     }
   ]
 }

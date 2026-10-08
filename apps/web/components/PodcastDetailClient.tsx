@@ -323,6 +323,7 @@ export default function PodcastDetailClient({ podcast, generatedClips }: { podca
                 <ClipCard 
                   key={clip.id} 
                   clip={clip} 
+                  sourceUrl={podcast.sourceUrl}
                   index={index} 
                   playerRef={playerRef} 
                   playedSeconds={playedSeconds} 

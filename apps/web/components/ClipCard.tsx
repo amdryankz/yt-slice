@@ -21,15 +21,41 @@ function formatTime(seconds: number) {
   return `${m}:${s}`;
 }
 
-export default function ClipCard({ clip: initialClip, index, playerRef, playedSeconds, onDelete, onPreview }: { clip: any, index: number, playerRef: any, playedSeconds: number, onDelete?: (id: string) => void, onPreview?: (start: number, end: number) => void }) {
-  const [localClip, setLocalClip] = useState(initialClip);
+function formatCaptionWithUrl(caption?: string | null, sourceUrl?: string) {
+  if (!caption) return sourceUrl ? `📺 Tonton video selengkapnya:\n${sourceUrl}` : "";
+  if (!sourceUrl || caption.includes(sourceUrl)) return caption;
+  return `${caption.trim()}\n\n📺 Tonton video selengkapnya:\n${sourceUrl}`;
+}
+
+export default function ClipCard({ 
+  clip: initialClip, 
+  sourceUrl,
+  index, 
+  playerRef, 
+  playedSeconds, 
+  onDelete, 
+  onPreview 
+}: { 
+  clip: any, 
+  sourceUrl?: string,
+  index: number, 
+  playerRef: any, 
+  playedSeconds: number, 
+  onDelete?: (id: string) => void, 
+  onPreview?: (start: number, end: number) => void 
+}) {
+  const formattedInitialCaption = formatCaptionWithUrl(initialClip.caption, sourceUrl);
+  const [localClip, setLocalClip] = useState({
+    ...initialClip,
+    caption: formattedInitialCaption,
+  });
   const [isCutting, setIsCutting] = useState(false);
   const [copied, setCopied] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [confirmCut, setConfirmCut] = useState(false);
   const [videoFormat, setVideoFormat] = useState<'original' | 'crop' | 'blur'>('original');
   const [editTitle, setEditTitle] = useState(initialClip.title);
-  const [editCaption, setEditCaption] = useState(initialClip.caption);
+  const [editCaption, setEditCaption] = useState(formattedInitialCaption);
   const [watermarkText, setWatermarkText] = useState("");
 
   // Editable timings
@@ -40,11 +66,18 @@ export default function ClipCard({ clip: initialClip, index, playerRef, playedSe
 
   // Sync with parent SSE updates
   useEffect(() => {
-    setLocalClip(initialClip);
+    const updatedCaption = formatCaptionWithUrl(initialClip.caption, sourceUrl);
+    setLocalClip({
+      ...initialClip,
+      caption: updatedCaption,
+    });
+    if (!isEditing) {
+      setEditCaption(updatedCaption);
+    }
     if (initialClip.status === 'completed' || initialClip.status === 'failed') {
       setIsCutting(false);
     }
-  }, [initialClip]);
+  }, [initialClip, sourceUrl, isEditing]);
 
   async function handleCut() {
     setIsCutting(true);
@@ -227,7 +260,7 @@ export default function ClipCard({ clip: initialClip, index, playerRef, playedSe
           <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Why it's viral</h4>
           <p className="text-sm text-slate-300 leading-relaxed">{localClip.explanation}</p>
         </div>
-        <div className="bg-white/5 p-4 rounded-2xl border border-white/5 flex-1 max-h-48 overflow-y-auto custom-scrollbar flex flex-col">
+        <div className="bg-white/5 p-4 rounded-2xl border border-white/5 flex-1 max-h-56 overflow-y-auto custom-scrollbar flex flex-col">
           <div className="flex items-center justify-between mb-2">
             <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Suggested Caption</h4>
             {!isEditing && (
@@ -244,8 +277,8 @@ export default function ClipCard({ clip: initialClip, index, playerRef, playedSe
             <textarea
               value={editCaption}
               onChange={(e) => setEditCaption(e.target.value)}
-              className="w-full flex-1 text-sm text-slate-300 leading-relaxed font-medium bg-slate-900/50 border border-slate-700 rounded-lg p-2 focus:outline-none focus:border-purple-500 resize-none"
-              rows={4}
+              className="w-full flex-1 text-sm text-slate-300 leading-relaxed font-medium bg-slate-900/50 border border-slate-700 rounded-lg p-2 focus:outline-none focus:border-purple-500 resize-none min-h-[110px]"
+              rows={5}
             />
           ) : (
             <p className="text-sm text-slate-300 leading-relaxed font-medium whitespace-pre-wrap">{localClip.caption}</p>

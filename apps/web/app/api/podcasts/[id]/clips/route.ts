@@ -45,7 +45,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       endTime,
       viralityScore: 100,
       explanation: 'Klip ditambahkan secara manual oleh pengguna.',
-      caption: 'Tonton momen menarik ini! #podcast #indonesia',
+      caption: `Tonton momen menarik ini! #podcast #indonesia\n\n📺 Tonton video selengkapnya:\n${podcast.sourceUrl}`,
       status: 'pending',
     }).returning();
 

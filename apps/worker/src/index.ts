@@ -74,7 +74,9 @@ const worker = new Worker(
               endTime: suggestion.endTime,
               viralityScore: suggestion.viralityScore,
               explanation: suggestion.explanation,
-              caption: suggestion.caption,
+              caption: suggestion.caption 
+                ? (suggestion.caption.includes(sourceUrl) ? suggestion.caption : `${suggestion.caption.trim()}\n\n📺 Tonton video selengkapnya:\n${sourceUrl}`)
+                : `📺 Tonton video selengkapnya:\n${sourceUrl}`,
               status: 'draft',
             }))
           );
@@ -122,7 +124,9 @@ const worker = new Worker(
             endTime: suggestion.endTime,
             viralityScore: suggestion.viralityScore,
             explanation: suggestion.explanation,
-            caption: suggestion.caption,
+            caption: suggestion.caption 
+              ? (suggestion.caption.includes(podcast.sourceUrl) ? suggestion.caption : `${suggestion.caption.trim()}\n\n📺 Tonton video selengkapnya:\n${podcast.sourceUrl}`)
+              : `📺 Tonton video selengkapnya:\n${podcast.sourceUrl}`,
             status: 'draft',
           }))
         );

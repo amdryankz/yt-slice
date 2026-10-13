@@ -3,6 +3,7 @@ import { db, podcasts } from "@workspace/db";
 import { desc } from "drizzle-orm";
 import Link from "next/link";
 import PodcastForm from "../components/PodcastForm";
+import ProxyBandwidthCard from "../components/ProxyBandwidthCard";
 
 export default async function Dashboard() {
   const allPodcasts = await db.query.podcasts.findMany({
@@ -26,6 +27,8 @@ export default async function Dashboard() {
         </div>
 
         <PodcastForm />
+
+        <ProxyBandwidthCard />
 
         <div className="w-full bg-white/5 border border-white/10 backdrop-blur-xl p-5 sm:p-8 rounded-3xl shadow-2xl">
           <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6 text-slate-100">Recent Projects</h2>

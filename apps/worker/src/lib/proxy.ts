@@ -1,17 +1,33 @@
-export const proxies = [
-  "http://krqhgqmx:uifephb7tjm2@31.59.20.176:6754",
-  "http://krqhgqmx:uifephb7tjm2@45.38.107.97:6014",
-  "http://krqhgqmx:uifephb7tjm2@64.137.96.74:6641",
-  "http://krqhgqmx:uifephb7tjm2@198.23.243.226:6361",
-  "http://krqhgqmx:uifephb7tjm2@38.154.185.97:6370",
-  "http://krqhgqmx:uifephb7tjm2@84.247.60.125:6095",
-  "http://krqhgqmx:uifephb7tjm2@142.111.67.146:5611",
-  "http://krqhgqmx:uifephb7tjm2@191.96.254.138:6185",
-  "http://krqhgqmx:uifephb7tjm2@31.58.9.4:6077",
-  "http://krqhgqmx:uifephb7tjm2@198.46.161.42:5092"
-];
+const PROXY_URL_ENV = "WEBSHARE_PROXY_URL";
 
-export function getRandomProxy(): string {
-  const randomIndex = Math.floor(Math.random() * proxies.length);
-  return proxies[randomIndex];
+/** Return the Webshare proxy URL without exposing its credentials in logs. */
+export function getProxyUrl(): string {
+  const proxyUrl = process.env[PROXY_URL_ENV]?.trim();
+
+  if (!proxyUrl) {
+    throw new Error(`${PROXY_URL_ENV} is missing from the worker environment.`);
+  }
+
+  try {
+    const parsed = new URL(proxyUrl);
+    if (!["http:", "https:", "socks5:"].includes(parsed.protocol)) {
+      throw new Error("Unsupported proxy protocol");
+    }
+    if (!parsed.hostname) {
+      throw new Error("Proxy host is required");
+    }
+  } catch {
+    throw new Error(`${PROXY_URL_ENV} must be a valid proxy URL, such as http://user:password@p.webshare.io:80.`);
+  }
+
+  return proxyUrl;
+}
+
+export function getProxyLabel(proxyUrl: string): string {
+  try {
+    const parsed = new URL(proxyUrl);
+    return parsed.port ? `${parsed.hostname}:${parsed.port}` : parsed.hostname;
+  } catch {
+    return "configured proxy";
+  }
 }

@@ -2,7 +2,8 @@ import fs from "node:fs/promises"
 import { createReadStream } from "node:fs"
 import path from "node:path"
 import { createClient } from "@deepgram/sdk"
-import { getRandomProxy } from "./proxy"
+import { getProxyLabel, getProxyUrl } from "./proxy"
+import { getYtDlpCookieArgs } from "./ytdlp"
 
 if (!process.env.DEEPGRAM_API_KEY) {
   throw new Error("DEEPGRAM_API_KEY is missing from environment variables.")
@@ -25,16 +26,18 @@ export async function cutVideoSegment(
 
   let lastError = '';
   let success = false;
+  const cookieArgs = await getYtDlpCookieArgs();
   
   for (let attempt = 1; attempt <= 3; attempt++) {
-    const proxy = getRandomProxy();
-    console.log(`[Video Cut] Attempt ${attempt}/3 using proxy: ${proxy.split('@')[1] || proxy}`);
+    const proxy = getProxyUrl();
+    console.log(`[Video Cut] Attempt ${attempt}/3 using proxy: ${getProxyLabel(proxy)}`);
     
     const proc = Bun.spawn(
       [
         "yt-dlp",
         "--proxy",
         proxy,
+        ...cookieArgs,
         "--js-runtimes",
         "deno",
         "--extractor-args",

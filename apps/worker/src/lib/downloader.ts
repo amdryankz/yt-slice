@@ -1,5 +1,6 @@
 import { join } from 'path';
-import { getRandomProxy } from './proxy';
+import { getProxyLabel, getProxyUrl } from './proxy';
+import { getYtDlpCookieArgs } from './ytdlp';
 
 export async function downloadAudio(url: string, workDir: string): Promise<string> {
   const outputPathTemplate = join(workDir, 'audio.%(ext)s');
@@ -7,10 +8,11 @@ export async function downloadAudio(url: string, workDir: string): Promise<strin
   const expectedFinalPath = join(workDir, 'audio.m4a');
 
   let lastError = '';
+  const cookieArgs = await getYtDlpCookieArgs();
   
   for (let attempt = 1; attempt <= 3; attempt++) {
-    const proxy = getRandomProxy();
-    console.log(`[Audio Download] Attempt ${attempt}/3 using proxy: ${proxy.split('@')[1] || proxy}`);
+    const proxy = getProxyUrl();
+    console.log(`[Audio Download] Attempt ${attempt}/3 using proxy: ${getProxyLabel(proxy)}`);
     
     const proc = Bun.spawn([
       'yt-dlp',
@@ -21,6 +23,7 @@ export async function downloadAudio(url: string, workDir: string): Promise<strin
       'deno',
       '--proxy',
       proxy,
+      ...cookieArgs,
       '--extractor-args',
       'youtube:player_client=android,web',
       '--output',

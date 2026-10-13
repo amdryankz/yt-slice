@@ -27,10 +27,14 @@ export async function cutVideoSegment(
   let lastError = '';
   let success = false;
   const cookieArgs = await getYtDlpCookieArgs();
+  const usedProxyHosts = new Set<string>();
+  const maxAttempts = 10;
   
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    const proxy = getProxyUrl();
-    console.log(`[Video Cut] Attempt ${attempt}/3 using proxy: ${getProxyLabel(proxy)}`);
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const proxy = await getProxyUrl(usedProxyHosts);
+    const proxyLabel = getProxyLabel(proxy);
+    usedProxyHosts.add(proxyLabel.toLowerCase());
+    console.log(`[Video Cut] Attempt ${attempt}/${maxAttempts} using proxy: ${proxyLabel}`);
     
     const proc = Bun.spawn(
       [
@@ -79,7 +83,7 @@ export async function cutVideoSegment(
 
   if (!success) {
     throw new Error(
-      `yt-dlp clip cut failed after 3 attempts. Last Error: ${lastError}`
+      `yt-dlp clip cut failed after ${maxAttempts} attempts. Last Error: ${lastError}`
     )
   }
 

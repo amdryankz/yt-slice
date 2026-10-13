@@ -9,10 +9,14 @@ export async function downloadAudio(url: string, workDir: string): Promise<strin
 
   let lastError = '';
   const cookieArgs = await getYtDlpCookieArgs();
+  const usedProxyHosts = new Set<string>();
+  const maxAttempts = 10;
   
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    const proxy = getProxyUrl();
-    console.log(`[Audio Download] Attempt ${attempt}/3 using proxy: ${getProxyLabel(proxy)}`);
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const proxy = await getProxyUrl(usedProxyHosts);
+    const proxyLabel = getProxyLabel(proxy);
+    usedProxyHosts.add(proxyLabel.toLowerCase());
+    console.log(`[Audio Download] Attempt ${attempt}/${maxAttempts} using proxy: ${proxyLabel}`);
     
     const proc = Bun.spawn([
       'yt-dlp',
@@ -50,7 +54,7 @@ export async function downloadAudio(url: string, workDir: string): Promise<strin
     await new Response(proc.stdout).text();
   }
 
-  throw new Error(`yt-dlp audio download failed after 3 attempts. Last Error: ${lastError}`);
+  throw new Error(`yt-dlp audio download failed after ${maxAttempts} attempts. Last Error: ${lastError}`);
 }
 
 export async function getAudioDuration(audioPath: string): Promise<number> {

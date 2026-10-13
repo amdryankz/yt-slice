@@ -1,1 +1,1 @@
-ALTER TABLE "clips" ADD COLUMN "thumbnail_path" text;
+ALTER TABLE "clips" ADD COLUMN IF NOT EXISTS "thumbnail_path" text;

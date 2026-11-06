@@ -39,6 +39,8 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
     const command = new GetObjectCommand({
       Bucket: process.env.S3_BUCKET_NAME,
       Key: key,
+      // Override older thumbnails that were uploaded with video/mp4 metadata.
+      ResponseContentType: 'image/jpeg',
       ResponseContentDisposition: isDownload ? `attachment; filename="${key}"` : undefined
     });
 
@@ -48,7 +50,7 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
     // Redirect the browser to the presigned URL
     return NextResponse.redirect(presignedUrl);
   } catch (err) {
-    console.error('[Video Proxy] Failed to proxy video:', err);
+    console.error('[Thumbnail Proxy] Failed to proxy thumbnail:', err);
     return new NextResponse('Internal Server Error', { status: 500 });
   }
 }

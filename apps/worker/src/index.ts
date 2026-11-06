@@ -178,7 +178,7 @@ const worker = new Worker(
         console.log(`[Job ${job.id}] Uploading to S3...`);
         
         const publicUrl = await uploadFile(outputPath, fileName);
-        const thumbPublicUrl = await uploadFile(thumbnailPath, thumbFileName);
+        const thumbPublicUrl = await uploadFile(thumbnailPath, thumbFileName, 'image/jpeg');
         console.log(`[Job ${job.id}] Upload successful: ${publicUrl}`);
         
         await db

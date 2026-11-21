@@ -67,7 +67,7 @@ const worker = new Worker(
         console.log(`[Job ${job.id}] Saving clips to the database...`);
         if (suggestions.length > 0) {
           await db.insert(clips).values(
-            suggestions.map((suggestion: any) => ({
+            suggestions.map((suggestion) => ({
               podcastId,
               title: suggestion.title,
               startTime: suggestion.startTime,
@@ -77,6 +77,7 @@ const worker = new Worker(
               caption: suggestion.caption 
                 ? (suggestion.caption.includes(sourceUrl) ? suggestion.caption : `${suggestion.caption.trim()}\n\n📺 Tonton video selengkapnya:\n${sourceUrl}`)
                 : `📺 Tonton video selengkapnya:\n${sourceUrl}`,
+              captionEn: suggestion.captionEn,
               status: 'draft',
             }))
           );
@@ -117,7 +118,7 @@ const worker = new Worker(
       console.log(`[Job ${job.id}] Saving regenerated clips to the database...`);
       if (suggestions.length > 0) {
         await db.insert(clips).values(
-          suggestions.map((suggestion: any) => ({
+          suggestions.map((suggestion) => ({
             podcastId,
             title: suggestion.title,
             startTime: suggestion.startTime,
@@ -127,6 +128,7 @@ const worker = new Worker(
             caption: suggestion.caption 
               ? (suggestion.caption.includes(podcast.sourceUrl) ? suggestion.caption : `${suggestion.caption.trim()}\n\n📺 Tonton video selengkapnya:\n${podcast.sourceUrl}`)
               : `📺 Tonton video selengkapnya:\n${podcast.sourceUrl}`,
+            captionEn: suggestion.captionEn,
             status: 'draft',
           }))
         );

@@ -22,6 +22,7 @@ export const clipSuggestionInputSchema = z.object({
   viralityScore: z.number().min(1).max(100).catch(50),
   explanation: z.string().catch(""),
   caption: z.string().catch("#podcast"),
+  captionEn: z.string().trim().min(1).nullable().catch(null),
 })
 
 export const clipArraySchema = z
@@ -41,6 +42,7 @@ export const clipArraySchema = z
       viralityScore: clip.viralityScore,
       explanation: clip.explanation,
       caption: clip.caption,
+      captionEn: clip.captionEn,
     }))
   })
 
@@ -92,7 +94,8 @@ Every clip MUST start and end cleanly:
 - 1-49: Filler, low energy, or incomplete thought — do not return clips scored below 50
 
 ## Output format
-All output values (title, explanation, and caption) MUST be written entirely in Bahasa Indonesia. The caption should include relevant Indonesian hashtags.
+Write title, explanation, and caption in Bahasa Indonesia. Include relevant Indonesian hashtags in caption.
+Write captionEn in natural English for an English-speaking audience. Use a hook and relevant English hashtags for the same clip, and preserve the facts. Leave the full-video link out of captionEn.
 
 You MUST format your response as a JSON array of exactly 5 objects.
 
@@ -104,7 +107,8 @@ Each object must match this exact structure:
   "endTime": "03:00",
   "viralityScore": 95,
   "explanation": "Explanation of the context and the opening phrase that grabs attention",
-  "caption": "An SEO-optimized caption with relevant hashtags"
+  "caption": "An Indonesian social caption with relevant hashtags",
+  "captionEn": "An English social caption with relevant hashtags"
 }
 
 ## Constraints
@@ -125,6 +129,7 @@ Each object must match this exact structure:
         viralityScore: { type: Type.INTEGER },
         explanation: { type: Type.STRING },
         caption: { type: Type.STRING },
+        captionEn: { type: Type.STRING },
       },
       required: [
         "reasoning",
@@ -134,6 +139,7 @@ Each object must match this exact structure:
         "viralityScore",
         "explanation",
         "caption",
+        "captionEn",
       ],
     },
   }

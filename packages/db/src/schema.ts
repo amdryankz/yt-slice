@@ -24,6 +24,7 @@ export const clips = pgTable('clips', {
   viralityScore: integer('virality_score'),
   explanation: text('explanation'),
   caption: text('caption'),
+  captionEn: text('caption_en'),
   status: text('status').default('draft').notNull(),
   errorMessage: text('error_message'),
   createdAt: timestamp('created_at').defaultNow().notNull(),

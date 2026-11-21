@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import ReactPlayer from "react-player";
 import Link from "next/link";
 import { ArrowLeft, Trash2, Loader2, RefreshCw } from "lucide-react";
@@ -29,6 +29,24 @@ export default function PodcastDetailClient({ podcast, generatedClips }: { podca
   const [previewEndTime, setPreviewEndTime] = useState<number | null>(null);
   const [showDeletePodcastConfirm, setShowDeletePodcastConfirm] = useState(false);
   const [showRegenerateConfirm, setShowRegenerateConfirm] = useState(false);
+  const activeClipRefresh = useRef<AbortController | null>(null);
+
+  const refreshClips = useCallback(async () => {
+    activeClipRefresh.current?.abort();
+    const request = new AbortController();
+    activeClipRefresh.current = request;
+
+    try {
+      const response = await fetch(`/api/podcasts/${podcast.id}/clips`, { signal: request.signal });
+      if (!response.ok) throw new Error('Failed to fetch clips');
+      const data = await response.json();
+      if (!request.signal.aborted && data.clips) setLocalClips(data.clips);
+    } catch (error) {
+      if (!request.signal.aborted) console.error('Failed to refresh clips', error);
+    } finally {
+      if (activeClipRefresh.current === request) activeClipRefresh.current = null;
+    }
+  }, [podcast.id]);
 
   useEffect(() => {
     const eventSource = new EventSource(`/api/podcasts/${podcast.id}/events`);
@@ -37,24 +55,15 @@ export default function PodcastDetailClient({ podcast, generatedClips }: { podca
       if (event.data === 'ping') return;
       try {
         const payload = JSON.parse(event.data);
-        if (payload.type === 'REFRESH_CLIPS') {
-          // Re-fetch clips quietly in the background
-          fetch(`/api/podcasts/${podcast.id}/clips`)
-            .then(res => res.json())
-            .then(data => {
-              if (data.clips) {
-                setLocalClips(data.clips);
-              }
-            })
-            .catch(err => console.error("Failed to refetch clips via SSE", err));
-        }
+        if (payload.type === 'REFRESH_CLIPS') void refreshClips();
       } catch (e) {}
     };
 
     return () => {
       eventSource.close();
+      activeClipRefresh.current?.abort();
     };
-  }, [podcast.id]);
+  }, [podcast.id, refreshClips]);
 
   function handlePreviewClip(start: number, end: number) {
     if (playerRef.current) {
@@ -329,6 +338,7 @@ export default function PodcastDetailClient({ podcast, generatedClips }: { podca
                   playedSeconds={playedSeconds} 
                   onDelete={(id) => setLocalClips(prev => prev.filter(c => c.id !== id))}
                   onPreview={handlePreviewClip}
+                  onClipUpdated={refreshClips}
                 />
               ))}
             </div>

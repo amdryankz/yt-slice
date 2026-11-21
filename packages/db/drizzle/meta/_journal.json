@@ -22,6 +22,13 @@
       "when": 1791275913083,
       "tag": "0002_redundant_the_fury",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795271772030,
+      "tag": "0003_workable_vin_gonzales",
+      "breakpoints": true
     }
   ]
 }

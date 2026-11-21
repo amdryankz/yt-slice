@@ -2,7 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { Flame, Edit2, Download, Copy, Check, Loader2, Play, MousePointer2, Trash2, ImageIcon, X } from "lucide-react";
+import type { clips } from "@workspace/db/schema";
 import toast from "react-hot-toast";
+import { formatCaptionWithUrl, type CaptionLanguage } from "@/lib/caption";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,11 +23,12 @@ function formatTime(seconds: number) {
   return `${m}:${s}`;
 }
 
-function formatCaptionWithUrl(caption?: string | null, sourceUrl?: string) {
-  if (!caption) return sourceUrl ? `📺 Tonton video selengkapnya:\n${sourceUrl}` : "";
-  if (!sourceUrl || caption.includes(sourceUrl)) return caption;
-  return `${caption.trim()}\n\n📺 Tonton video selengkapnya:\n${sourceUrl}`;
-}
+const captionLanguages = [
+  { code: 'id', label: 'Bahasa Indonesia' },
+  { code: 'en', label: 'English' },
+] as const;
+
+type Clip = typeof clips.$inferSelect;
 
 export default function ClipCard({ 
   clip: initialClip, 
@@ -34,28 +37,34 @@ export default function ClipCard({
   playerRef, 
   playedSeconds, 
   onDelete, 
-  onPreview 
+  onPreview,
+  onClipUpdated,
 }: { 
-  clip: any, 
+  clip: Clip,
   sourceUrl?: string,
   index: number, 
   playerRef: any, 
   playedSeconds: number, 
   onDelete?: (id: string) => void, 
-  onPreview?: (start: number, end: number) => void 
+  onPreview?: (start: number, end: number) => void,
+  onClipUpdated?: () => void,
 }) {
-  const formattedInitialCaption = formatCaptionWithUrl(initialClip.caption, sourceUrl);
-  const [localClip, setLocalClip] = useState({
-    ...initialClip,
-    caption: formattedInitialCaption,
-  });
+  const [localClip, setLocalClip] = useState(initialClip);
   const [isCutting, setIsCutting] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
+  const [captionLanguage, setCaptionLanguage] = useState<CaptionLanguage>('id');
+  const [copiedLanguage, setCopiedLanguage] = useState<CaptionLanguage | null>(null);
+  const [isGeneratingCaption, setIsGeneratingCaption] = useState(false);
+  const [captionError, setCaptionError] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [editSession, setEditSession] = useState<{
+    mode: 'clip' | 'caption';
+    originalTitle: string;
+    originalCaption: string | null;
+  } | null>(null);
   const [confirmCut, setConfirmCut] = useState(false);
   const [videoFormat, setVideoFormat] = useState<'original' | 'crop' | 'blur'>('original');
   const [editTitle, setEditTitle] = useState(initialClip.title);
-  const [editCaption, setEditCaption] = useState(formattedInitialCaption);
+  const [editCaption, setEditCaption] = useState('');
   const [watermarkText, setWatermarkText] = useState("");
 
   // Editable timings
@@ -64,24 +73,23 @@ export default function ClipCard({
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+  const isEditingClip = editSession?.mode === 'clip';
+  const selectedCaption = captionLanguage === 'id' ? localClip.caption : localClip.captionEn;
+  const captionText = captionLanguage === 'en' && selectedCaption == null
+    ? null
+    : formatCaptionWithUrl(selectedCaption, sourceUrl, captionLanguage);
+
   // Sync with parent SSE updates
   useEffect(() => {
-    const updatedCaption = formatCaptionWithUrl(initialClip.caption, sourceUrl);
-    setLocalClip({
-      ...initialClip,
-      caption: updatedCaption,
-    });
-    if (!isEditing) {
-      setEditCaption(updatedCaption);
-    }
+    setLocalClip(initialClip);
     if (initialClip.status === 'completed' || initialClip.status === 'failed') {
       setIsCutting(false);
     }
-  }, [initialClip, sourceUrl, isEditing]);
+  }, [initialClip]);
 
   async function handleCut() {
     setIsCutting(true);
-    setLocalClip((prev: any) => ({ ...prev, status: 'processing' }));
+    setLocalClip((prev) => ({ ...prev, status: 'processing' }));
     
     try {
       // Send the edited start and end times to the API
@@ -104,50 +112,103 @@ export default function ClipCard({
     } catch (err) {
       console.error(err);
       toast.error('Gagal memproses klip');
-      setLocalClip((prev: any) => ({ ...prev, status: 'failed' }));
+      setLocalClip((prev) => ({ ...prev, status: 'failed' }));
       setIsCutting(false);
     }
   }
 
   async function handleCopyCaption() {
+    if (!captionText) return;
     try {
       if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(localClip.caption);
+        await navigator.clipboard.writeText(captionText);
       } else {
         // Fallback for HTTP environments
         const textArea = document.createElement("textarea");
-        textArea.value = localClip.caption;
+        textArea.value = captionText;
         textArea.style.position = "absolute";
         textArea.style.left = "-999999px";
         document.body.prepend(textArea);
         textArea.select();
-        document.execCommand('copy');
-        textArea.remove();
+        try {
+          if (!document.execCommand('copy')) throw new Error('Clipboard copy failed');
+        } finally {
+          textArea.remove();
+        }
       }
-      setCopied(true);
+      setCopiedLanguage(captionLanguage);
       toast.success('Caption disalin ke clipboard');
-      setTimeout(() => setCopied(false), 2000);
+      setTimeout(() => setCopiedLanguage((current) => current === captionLanguage ? null : current), 2000);
     } catch (err) {
       console.error(err);
       toast.error('Gagal menyalin caption');
     }
   }
 
+  async function selectCaptionLanguage(language: CaptionLanguage) {
+    setCaptionLanguage(language);
+    if (language !== 'en' || localClip.captionEn != null || isGeneratingCaption) return;
+
+    setIsGeneratingCaption(true);
+    setCaptionError(false);
+    try {
+      const res = await fetch(`/api/clips/${localClip.id}/caption`, { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to generate English caption');
+      const { captionEn } = await res.json() as { captionEn: string };
+      setLocalClip((prev) => ({ ...prev, captionEn }));
+      onClipUpdated?.();
+    } catch (error) {
+      console.error(error);
+      setCaptionError(true);
+    } finally {
+      setIsGeneratingCaption(false);
+    }
+  }
+
+  function startEditing(mode: 'clip' | 'caption') {
+    setEditSession({ mode, originalTitle: localClip.title, originalCaption: captionText });
+    setEditTitle(localClip.title);
+    setEditCaption(captionText ?? '');
+  }
+
   async function handleSaveEdits() {
+    if (!editSession) return;
+
+    const updates: Partial<Pick<Clip, 'title' | 'caption' | 'captionEn'>> = {};
+    if (isEditingClip && editTitle !== editSession.originalTitle) updates.title = editTitle;
+    if (editSession.originalCaption !== null && editCaption !== editSession.originalCaption) {
+      if (captionLanguage === 'en') {
+        if (!editCaption.trim()) {
+          toast.error('Enter an English caption before saving.');
+          return;
+        }
+        updates.captionEn = editCaption;
+      } else {
+        updates.caption = editCaption;
+      }
+    }
+    if (!Object.keys(updates).length) {
+      setEditSession(null);
+      return;
+    }
+
+    setIsSaving(true);
     try {
       const res = await fetch(`/api/clips/${localClip.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: editTitle, caption: editCaption })
+        body: JSON.stringify(updates)
       });
       if (!res.ok) throw new Error('Failed to update');
-      const data = await res.json();
-      setLocalClip(data.clip);
-      setIsEditing(false);
+      setLocalClip((prev) => ({ ...prev, ...updates }));
+      setEditSession(null);
+      onClipUpdated?.();
       toast.success('Perubahan disimpan!');
     } catch (err) {
       console.error(err);
       toast.error('Gagal menyimpan perubahan');
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -174,10 +235,11 @@ export default function ClipCard({
   return (
     <div className="w-[85vw] sm:w-[400px] flex-shrink-0 snap-center flex flex-col bg-white/5 border border-white/10 p-6 rounded-3xl hover:bg-white/10 transition-colors shadow-lg">
       <div className="flex justify-between items-start gap-4">
-        {isEditing ? (
+        {isEditingClip ? (
           <input 
             type="text" 
             value={editTitle} 
+            disabled={isSaving}
             onChange={(e) => setEditTitle(e.target.value)}
             className="font-bold text-xl text-slate-100 flex-1 bg-slate-900/50 border border-slate-700 rounded-lg px-2 py-1 focus:outline-none focus:border-purple-500 min-w-0"
           />
@@ -234,7 +296,7 @@ export default function ClipCard({
         </button>
       </div>
 
-      {isEditing && localClip.status !== 'completed' && localClip.status !== 'processing' && (
+      {isEditingClip && localClip.status !== 'completed' && localClip.status !== 'processing' && (
         <div className="mt-4 bg-slate-900/50 border border-purple-500/30 p-4 rounded-xl flex flex-col gap-3">
           <p className="text-xs text-purple-400 font-semibold mb-1 uppercase tracking-wider">Smart Editor</p>
           <div className="flex items-center gap-3">
@@ -260,28 +322,77 @@ export default function ClipCard({
           <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Why it's viral</h4>
           <p className="text-sm text-slate-300 leading-relaxed">{localClip.explanation}</p>
         </div>
-        <div className="bg-white/5 p-4 rounded-2xl border border-white/5 flex-1 max-h-56 overflow-y-auto custom-scrollbar flex flex-col">
+        <div className="bg-white/5 p-4 rounded-2xl border border-white/5 flex-1 flex flex-col">
           <div className="flex items-center justify-between mb-2">
             <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Suggested Caption</h4>
-            {!isEditing && (
-              <button 
-                onClick={handleCopyCaption}
-                className="text-xs flex items-center gap-1 text-purple-400 hover:text-purple-300 transition-colors"
-              >
-                {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                {copied ? "Copied!" : "Copy"}
-              </button>
+            {!editSession && captionText !== null && (
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => startEditing('caption')}
+                  className="text-xs flex items-center gap-1 text-purple-400 hover:text-purple-300"
+                >
+                  <Edit2 className="w-3 h-3" /> Edit
+                </button>
+                {captionText && (
+                  <button
+                    type="button"
+                    onClick={handleCopyCaption}
+                    className="text-xs flex items-center gap-1 text-purple-400 hover:text-purple-300"
+                  >
+                    {copiedLanguage === captionLanguage ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                    {copiedLanguage === captionLanguage ? 'Copied!' : 'Copy'}
+                  </button>
+                )}
+              </div>
             )}
           </div>
-          {isEditing ? (
+          <div role="group" aria-label="Caption language" className="mb-3 flex w-fit gap-1 rounded-lg bg-slate-950/60 p-1">
+            {captionLanguages.map(({ code, label }) => (
+              <button
+                key={code}
+                type="button"
+                lang={code}
+                aria-pressed={captionLanguage === code}
+                disabled={Boolean(editSession) || (code === 'en' && isGeneratingCaption)}
+                onClick={() => selectCaptionLanguage(code)}
+                className={`rounded-md px-2 py-1 text-xs font-medium transition-colors disabled:cursor-default ${captionLanguage === code ? 'bg-purple-500/25 text-purple-200' : 'text-slate-400 enabled:hover:text-slate-100'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {editSession && editSession.originalCaption !== null ? (
             <textarea
+              aria-label={`${captionLanguage === 'en' ? 'English' : 'Indonesian'} caption`}
+              lang={captionLanguage}
               value={editCaption}
+              disabled={isSaving}
               onChange={(e) => setEditCaption(e.target.value)}
               className="w-full flex-1 text-sm text-slate-300 leading-relaxed font-medium bg-slate-900/50 border border-slate-700 rounded-lg p-2 focus:outline-none focus:border-purple-500 resize-none min-h-[110px]"
               rows={5}
             />
-          ) : (
-            <p className="text-sm text-slate-300 leading-relaxed font-medium whitespace-pre-wrap">{localClip.caption}</p>
+          ) : captionText !== null ? (
+            <p lang={captionLanguage} className="text-sm text-slate-300 leading-relaxed font-medium whitespace-pre-wrap break-words max-h-36 overflow-y-auto custom-scrollbar">{captionText}</p>
+          ) : !editSession && (
+            <div aria-live="polite" className="text-sm text-slate-400">
+              {isGeneratingCaption ? 'Generating English caption…' : (
+                <>
+                  {captionError && <p>Could not generate the English caption.</p>}
+                  <button type="button" onClick={() => selectCaptionLanguage('en')} className="mt-1 text-purple-400 hover:text-purple-300">
+                    {captionError ? 'Try again' : 'Generate English caption'}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+          {editSession && (
+            <div className="mt-2 flex justify-end gap-3 text-xs font-semibold">
+              <button type="button" disabled={isSaving} onClick={() => setEditSession(null)} className="px-2 py-1 text-slate-300 hover:text-white">Cancel</button>
+              <button type="button" disabled={isSaving} onClick={handleSaveEdits} className="rounded-md bg-purple-600 px-2 py-1 text-white hover:bg-purple-500 disabled:opacity-50">
+                {isSaving ? 'Saving…' : isEditingClip ? 'Save Changes' : 'Save caption'}
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -311,15 +422,6 @@ export default function ClipCard({
       ) : (
         <div className="mt-6 flex flex-col gap-3 mt-auto pt-2">
           
-          {isEditing && (
-            <button 
-              onClick={handleSaveEdits}
-              className="w-full bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-300 border border-emerald-500/30 py-2 rounded-xl text-sm font-semibold transition-all mb-2"
-            >
-              Save Changes
-            </button>
-          )}
-
           <div className="bg-white/5 border border-white/10 rounded-xl p-3 flex flex-col gap-2">
             <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Watermark Text (Optional)</label>
             <input 
@@ -374,13 +476,13 @@ export default function ClipCard({
             ) : (
               <>
                 <button 
-                  onClick={() => setIsEditing(!isEditing)}
-                  disabled={localClip.status === 'processing' || isCutting}
+                  onClick={() => isEditingClip ? setEditSession(null) : startEditing('clip')}
+                  disabled={localClip.status === 'processing' || isCutting || isSaving || editSession?.mode === 'caption'}
                   className={`flex items-center justify-center gap-2 flex-1 border py-3 rounded-xl text-sm font-semibold transition-all ${
-                    isEditing ? "bg-white/20 border-white/30 text-white" : "bg-white/5 border-white/10 hover:bg-white/10 text-slate-200"
+                    isEditingClip ? "bg-white/20 border-white/30 text-white" : "bg-white/5 border-white/10 hover:bg-white/10 text-slate-200"
                   }`}
                 >
-                  <Edit2 className="w-4 h-4" /> {isEditing ? "Selesai Edit" : "Edit Klip"}
+                  <Edit2 className="w-4 h-4" /> {isEditingClip ? "Selesai Edit" : "Edit Klip"}
                 </button>
                 
                 <button 

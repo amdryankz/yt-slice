@@ -68,9 +68,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const { id } = await params;
     const body = await req.json();
     
-    const updateData: any = {};
+    const updateData: Partial<Pick<typeof clips.$inferInsert, 'title' | 'caption' | 'captionEn'>> = {};
     if (body.title !== undefined) updateData.title = body.title;
     if (body.caption !== undefined) updateData.caption = body.caption;
+    if (body.captionEn !== undefined) {
+      if (typeof body.captionEn !== 'string' || !body.captionEn.trim()) {
+        return NextResponse.json({ error: 'English caption must be non-empty text' }, { status: 400 });
+      }
+      updateData.captionEn = body.captionEn;
+    }
 
     const [updatedClip] = await db
       .update(clips)

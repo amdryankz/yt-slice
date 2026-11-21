@@ -7,7 +7,7 @@ Powered by Google Gemini for intelligent semantic chunking and Deepgram for ligh
 ## 🚀 Features
 
 - **Full Video Downloading**: Instantly downloads high-quality segments from YouTube via `yt-dlp`.
-- **AI Transcription**: High-accuracy Indonesian speech-to-text powered by Deepgram Nova-2.
+- **AI Transcription**: Deepgram Nova-3 detects the spoken language and generates multilingual clip subtitles, including English and Indonesian.
 - **Smart Chunking**: Uses Google Gemini to find viral hooks, summarize content, and pinpoint the best moments.
 - **Dynamic Subtitles**: Automatically burns viral, "Hormozi-style" bold highlighted subtitles using FFmpeg and libass.
 - **Cloud Storage**: Securely uploads finished clips to Cloudflare R2 (S3 compatible) and streams them via secure signed URLs.

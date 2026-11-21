@@ -3,6 +3,7 @@ import { createReadStream } from "node:fs"
 import path from "node:path"
 import { createClient } from "@deepgram/sdk"
 import { getProxyLabel, getProxyUrl } from "./proxy"
+import { formatSubtitleWord } from "./subtitle-text"
 import { getYtDlpCookieArgs } from "./ytdlp"
 
 if (!process.env.DEEPGRAM_API_KEY) {
@@ -93,9 +94,9 @@ export async function cutVideoSegment(
     const { result, error } = await deepgram.listen.prerecorded.transcribeFile(
       audioStream,
       {
-        model: "nova-2",
+        model: "nova-3",
         smart_format: true,
-        language: "id",
+        language: "multi",
       }
     )
 
@@ -128,52 +129,38 @@ export async function cutVideoSegment(
       return `${hours}:${minutes}:${secs}.${centis}`
     }
 
+    const allWords = words.map((word) => ({ ...word, text: formatSubtitleWord(word) }))
+    type SubtitleWord = (typeof allWords)[number]
     type Phrase = {
-      words: any[]
+      words: SubtitleWord[]
       start: number
       end: number
     }
 
-    const allWords = words.map((w: any) => ({ ...w }))
     for (let i = 0; i < allWords.length - 1; i++) {
-      if (allWords[i].end > allWords[i + 1].start) {
-        allWords[i].end = allWords[i + 1].start
-      }
-    }
-
-    function fixReduplication(value: string) {
-      // Find exactly repeated substrings (length >= 4) to fix missing hyphens
-      // e.g., kawankawan -> kawan-kawan, samasama -> sama-sama
-      // Also preserves any trailing punctuation
-      const match = value.match(/^([a-zA-Z]{4,})\1([.,!?]*)$/i);
-      if (match) {
-        return `${match[1]}-${match[1]}${match[2]}`;
-      }
-      return value;
+      const word = allWords[i]!
+      word.end = Math.min(word.end, allWords[i + 1]!.start)
     }
 
     function groupWords(
-      words: any[],
+      words: SubtitleWord[],
       maxChars: number,
       maxWords: number,
       gapThreshold: number
     ): Phrase[] {
       const grouped: Phrase[] = []
-      let current: any[] = []
+      let current: SubtitleWord[] = []
       let currentCharCount = 0
 
-      for (let i = 0; i < words.length; i++) {
-        const word = words[i]
-        const cleanWord = fixReduplication(word.punctuated_word || word.word)
-
+      for (const word of words) {
         if (
           current.length > 0 &&
-          currentCharCount + cleanWord.length > maxChars
+          currentCharCount + word.text.length > maxChars
         ) {
           grouped.push({
             words: current,
-            start: current[0].start,
-            end: current[current.length - 1].end,
+            start: current[0]!.start,
+            end: current.at(-1)!.end,
           })
           current = []
           currentCharCount = 0
@@ -190,22 +177,22 @@ export async function cutVideoSegment(
         if (shouldBreak && current.length > 0) {
           grouped.push({
             words: current,
-            start: current[0].start,
-            end: current[current.length - 1].end,
+            start: current[0]!.start,
+            end: current.at(-1)!.end,
           })
           current = []
           currentCharCount = 0
         }
 
         current.push(word)
-        currentCharCount += cleanWord.length + 1
+        currentCharCount += word.text.length + 1
       }
 
       if (current.length > 0) {
         grouped.push({
           words: current,
-          start: current[0].start,
-          end: current[current.length - 1].end,
+          start: current[0]!.start,
+          end: current.at(-1)!.end,
         })
       }
 
@@ -238,15 +225,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         const nextPhrase = phrases[pIndex + 1]
         const absolutePhraseEnd = nextPhrase
           ? nextPhrase.start
-          : phrase.words[phrase.words.length - 1].end + 0.5
+          : phrase.end + 0.5
 
         return phrase.words.map((activeWord, activeIndex) => {
           let startSeconds = activeWord.start
 
           let endSeconds =
-            activeIndex < phrase.words.length - 1
-              ? phrase.words[activeIndex + 1].start
-              : Math.min(activeWord.end + 0.1, absolutePhraseEnd)
+            phrase.words[activeIndex + 1]?.start ??
+            Math.min(activeWord.end + 0.1, absolutePhraseEnd)
 
           if (startSeconds >= endSeconds) {
             endSeconds = startSeconds + 0.1
@@ -257,8 +243,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
           let text = phrase.words
             .map((w, wIndex) => {
-              const rawWord = fixReduplication(w.punctuated_word || w.word)
-              const cleanWord = sanitizeText(rawWord).toUpperCase()
+              const cleanWord = sanitizeText(w.text).toUpperCase()
 
               if (wIndex === activeIndex) {
                 return `{\\c&H00FFFF&}${cleanWord}{\\c&HFFFFFF&}`

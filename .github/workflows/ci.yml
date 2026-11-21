@@ -25,6 +25,9 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
+      - name: Test worker
+        run: bun test apps/worker/src
+
       - name: Setup dummy environment variables
         run: |
           cp .env.example .env

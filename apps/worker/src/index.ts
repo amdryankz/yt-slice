@@ -1,14 +1,13 @@
 import './env';
 import fs from 'fs/promises';
-import os from 'os';
 import path, { join } from 'path';
 import { Worker, Job } from 'bullmq';
 import { connection, videoQueue, redisPublisher, type AnyJobPayload, type VideoJobPayload, type CutClipJobPayload, type RegenerateJobPayload } from '@workspace/jobs';
 import { db, podcasts, clips } from '@workspace/db';
-import { eq, lt, or, and } from 'drizzle-orm';
+import { eq, lt, or, and, ne } from 'drizzle-orm';
 import { downloadAudio, getAudioDuration } from './lib/downloader';
 import { transcribeAudio } from './lib/transcriber';
-import { analyzeTranscript } from './lib/gemini';
+import { analyzeTranscript, type ClipSuggestion } from './lib/gemini';
 import { cutVideoSegment, generateThumbnail } from './lib/clipper';
 import { uploadFile } from './lib/storage';
 
@@ -17,6 +16,44 @@ if (!process.env.DEEPGRAM_API_KEY) {
 }
 
 console.log('Worker is starting up and connecting to Redis at', connection.host, connection.port);
+
+async function saveClipSuggestions(
+  podcast: Pick<typeof podcasts.$inferSelect, 'id' | 'sourceUrl' | 'contentLanguage'>,
+  suggestions: ClipSuggestion[],
+  replaceDrafts = false,
+) {
+  const rows = suggestions.map((suggestion) => {
+    let caption = suggestion.caption;
+    if (podcast.contentLanguage === null && !caption?.includes(podcast.sourceUrl)) {
+      const footer = `📺 Tonton video selengkapnya:\n${podcast.sourceUrl}`;
+      caption = caption ? `${caption.trim()}\n\n${footer}` : footer;
+    }
+
+    return { ...suggestion, caption, podcastId: podcast.id, status: 'draft' };
+  });
+
+  return db.transaction(async (tx) => {
+    const [updated] = await tx.update(podcasts)
+      .set({ status: 'completed', errorMessage: null })
+      .where(and(eq(podcasts.id, podcast.id), replaceDrafts ? undefined : ne(podcasts.status, 'completed')))
+      .returning({ id: podcasts.id });
+    if (!updated) return false;
+
+    if (replaceDrafts) {
+      await tx.delete(clips).where(and(
+        eq(clips.podcastId, podcast.id),
+        or(eq(clips.status, 'draft'), eq(clips.status, 'failed')),
+      ));
+    }
+    await tx.insert(clips).values(rows);
+    return true;
+  });
+}
+
+async function notifyPodcastChanged(podcastId: string) {
+  await redisPublisher.publish(`podcast_events_${podcastId}`, JSON.stringify({ type: 'REFRESH_CLIPS' }))
+    .catch((error) => console.warn(`Could not notify clients for podcast ${podcastId}:`, error));
+}
 
 const worker = new Worker(
   'video-processing',
@@ -44,52 +81,26 @@ const worker = new Worker(
         console.log(`[Job ${job.id}] Transcription successful. Length: ${transcript.length} characters.`);
 
         // Save transcript to database for future regeneration
-        await db.update(podcasts).set({
+        const [podcast] = await db.update(podcasts).set({
           transcript: transcript,
           durationSeconds: Math.floor(durationSeconds)
-        }).where(eq(podcasts.id, podcastId));
+        }).where(and(eq(podcasts.id, podcastId), ne(podcasts.status, 'completed'))).returning({
+          id: podcasts.id,
+          sourceUrl: podcasts.sourceUrl,
+          contentLanguage: podcasts.contentLanguage,
+        });
+        if (!podcast) return { skipped: true, reason: 'Podcast was deleted or already processed' };
 
         console.log(`[Job ${job.id}] Analyzing transcript directly with Gemini...`);
-        const suggestions = await analyzeTranscript(transcript, durationSeconds);
+        const suggestions = await analyzeTranscript(transcript, durationSeconds, podcast.contentLanguage);
         console.log(`[Job ${job.id}] Gemini Analysis Complete. Suggested clips:`);
         console.log(JSON.stringify(suggestions, null, 2));
         
-        // Cek apakah podcast belum dihapus oleh user di tengah proses
-        const currentPodcast = await db.query.podcasts.findFirst({
-          where: eq(podcasts.id, podcastId),
-        });
-
-        if (!currentPodcast) {
-          console.warn(`[Job ${job.id}] Podcast ${podcastId} was deleted during processing. Aborting insertion.`);
-          return { success: false, reason: 'Podcast deleted mid-processing' };
-        }
-        
         console.log(`[Job ${job.id}] Saving clips to the database...`);
-        if (suggestions.length > 0) {
-          await db.insert(clips).values(
-            suggestions.map((suggestion) => ({
-              podcastId,
-              title: suggestion.title,
-              startTime: suggestion.startTime,
-              endTime: suggestion.endTime,
-              viralityScore: suggestion.viralityScore,
-              explanation: suggestion.explanation,
-              caption: suggestion.caption 
-                ? (suggestion.caption.includes(sourceUrl) ? suggestion.caption : `${suggestion.caption.trim()}\n\n📺 Tonton video selengkapnya:\n${sourceUrl}`)
-                : `📺 Tonton video selengkapnya:\n${sourceUrl}`,
-              captionEn: suggestion.captionEn,
-              status: 'draft',
-            }))
-          );
+        if (!await saveClipSuggestions(podcast, suggestions)) {
+          return { skipped: true, reason: 'Podcast was deleted or already processed' };
         }
-        
-        // Update the database status to 'completed'
-        await db
-          .update(podcasts)
-          .set({ status: 'completed' })
-          .where(eq(podcasts.id, podcastId));
-          
-        await redisPublisher.publish(`podcast_events_${podcastId}`, JSON.stringify({ type: 'REFRESH_CLIPS' }));
+        await notifyPodcastChanged(podcastId);
           
         console.log(`[Job ${job.id}] Completed processing podcast ${podcastId}`);
         return { success: true, audioPath, suggestionsCount: suggestions.length };
@@ -113,28 +124,13 @@ const worker = new Worker(
       }
 
       console.log(`[Job ${job.id}] Analyzing existing transcript directly with Gemini...`);
-      const suggestions = await analyzeTranscript(podcast.transcript, podcast.durationSeconds);
+      const suggestions = await analyzeTranscript(podcast.transcript, podcast.durationSeconds, podcast.contentLanguage);
       
       console.log(`[Job ${job.id}] Saving regenerated clips to the database...`);
-      if (suggestions.length > 0) {
-        await db.insert(clips).values(
-          suggestions.map((suggestion) => ({
-            podcastId,
-            title: suggestion.title,
-            startTime: suggestion.startTime,
-            endTime: suggestion.endTime,
-            viralityScore: suggestion.viralityScore,
-            explanation: suggestion.explanation,
-            caption: suggestion.caption 
-              ? (suggestion.caption.includes(podcast.sourceUrl) ? suggestion.caption : `${suggestion.caption.trim()}\n\n📺 Tonton video selengkapnya:\n${podcast.sourceUrl}`)
-              : `📺 Tonton video selengkapnya:\n${podcast.sourceUrl}`,
-            captionEn: suggestion.captionEn,
-            status: 'draft',
-          }))
-        );
+      if (!await saveClipSuggestions(podcast, suggestions, true)) {
+        return { skipped: true, reason: 'Podcast deleted mid-processing' };
       }
-      
-      await redisPublisher.publish(`podcast_events_${podcastId}`, JSON.stringify({ type: 'REFRESH_CLIPS' }));
+      await notifyPodcastChanged(podcastId);
       console.log(`[Job ${job.id}] Completed regenerating clips for ${podcastId}`);
       return { success: true, suggestionsCount: suggestions.length };
       
@@ -142,18 +138,12 @@ const worker = new Worker(
       const { clipId, format, watermarkText } = job.data as CutClipJobPayload;
       
       console.log(`[Job ${job.id}] Cutting clip ${clipId}`);
-      let podcastIdToNotify: string | null = null;
+      let workDir: string | undefined;
       
       try {
-        const clip = await db.query.clips.findFirst({
-          where: eq(clips.id, clipId),
-        });
-        
-        if (!clip) {
-          throw new Error(`Clip ${clipId} not found in database.`);
-        }
-        
-        podcastIdToNotify = clip.podcastId;
+        // Wait for the cut request to commit its timings after enqueueing.
+        const [clip] = await db.select().from(clips).where(eq(clips.id, clipId)).for('update');
+        if (!clip || clip.status !== 'processing') return { skipped: true };
         
         const podcast = await db.query.podcasts.findFirst({
           where: eq(podcasts.id, clip.podcastId!),
@@ -163,19 +153,21 @@ const worker = new Worker(
           throw new Error(`Podcast ${clip.podcastId} not found for clip ${clipId}.`);
         }
         
-        const tmpDir = os.tmpdir();
+        const tmpDir = '/tmp/clip-ai';
+        await fs.mkdir(tmpDir, { recursive: true });
+        workDir = await fs.mkdtemp(path.join(tmpDir, 'cut-'));
         const fileName = `clip-${clip.id}.mp4`;
-        const outputPath = path.join(tmpDir, fileName);
+        const outputPath = path.join(workDir, fileName);
         
         console.log(`[Job ${job.id}] Downloading and formatting video segment to ${outputPath}...`);
         
-        await cutVideoSegment(podcast.sourceUrl, clip.startTime, clip.endTime, outputPath, format as any, watermarkText);
+        const speakerFilter = await cutVideoSegment(podcast.sourceUrl, clip.startTime, clip.endTime, outputPath, format, watermarkText);
         
         console.log(`[Job ${job.id}] Cut successful! Generating thumbnail...`);
         const thumbnailPath = `${outputPath}.thumb.jpg`;
         const thumbFileName = `clip-${clip.id}-thumb.jpg`;
         // Pass the raw video (.tmp.mp4) before subtitles are added, and pass the format
-        await generateThumbnail(`${outputPath}.tmp.mp4`, thumbnailPath, clip.title, format as any);
+        await generateThumbnail(`${outputPath}.tmp.mp4`, thumbnailPath, clip.title, format, speakerFilter);
         
         console.log(`[Job ${job.id}] Uploading to S3...`);
         
@@ -185,37 +177,18 @@ const worker = new Worker(
         
         await db
           .update(clips)
-          .set({ status: 'completed', clipPath: publicUrl, thumbnailPath: thumbPublicUrl })
+          .set({ status: 'completed', errorMessage: null, clipPath: publicUrl, thumbnailPath: thumbPublicUrl })
           .where(eq(clips.id, clipId));
           
-        if (podcastIdToNotify) {
-          await redisPublisher.publish(`podcast_events_${podcastIdToNotify}`, JSON.stringify({ type: 'REFRESH_CLIPS' }));
-        }
-          
-        // Cleanup temp files
-        await fs.unlink(outputPath).catch(() => {});
-        await fs.unlink(thumbnailPath).catch(() => {});
-        await fs.unlink(`${outputPath}.tmp.mp4`).catch(() => {});
-        await fs.unlink(`${outputPath}.tmp.ass`).catch(() => {});
+        await notifyPodcastChanged(podcast.id);
           
         return { success: true, clipPath: publicUrl, thumbnailPath: thumbPublicUrl };
-      } catch (error: any) {
-        console.error(`[Job ${job.id}] Failed to cut clip:`, error);
-        
-        // Prevent race condition: don't overwrite if another job already completed it
-        const currentClip = await db.query.clips.findFirst({ where: eq(clips.id, clipId) });
-        if (currentClip && currentClip.status !== 'completed') {
-          await db
-            .update(clips)
-            .set({ status: 'failed' })
-            .where(eq(clips.id, clipId));
-            
-          if (podcastIdToNotify) {
-            await redisPublisher.publish(`podcast_events_${podcastIdToNotify}`, JSON.stringify({ type: 'REFRESH_CLIPS' }));
-          }
+      } finally {
+        if (workDir) {
+          await fs.rm(workDir, { recursive: true, force: true }).catch((error) => {
+            console.warn(`[Job ${job.id}] Failed to clean up ${workDir}:`, error);
+          });
         }
-          
-        throw error;
       }
     } else if (job.name === 'cleanup-temp-files') {
       console.log(`[Job ${job.id}] Running scheduled auto-cleanup...`);
@@ -282,32 +255,27 @@ worker.on('completed', (job) => {
 worker.on('failed', async (job, err) => {
   console.error(`[Worker] Job ${job?.id} (${job?.name}) has failed with error: ${err.message}`);
   
-  if (!job) return;
+  if (!job?.finishedOn) return;
 
   const errorMessage = err.message || 'Unknown error occurred';
 
   try {
     if (job.name === 'process-video') {
       const { podcastId } = job.data as VideoJobPayload;
-      await db.update(podcasts).set({ status: 'failed', errorMessage }).where(eq(podcasts.id, podcastId));
-      await redisPublisher.publish(`podcast_events_${podcastId}`, JSON.stringify({ type: 'REFRESH_CLIPS' }));
+      await db.update(podcasts).set({ status: 'failed', errorMessage })
+        .where(and(eq(podcasts.id, podcastId), ne(podcasts.status, 'completed')));
+      await notifyPodcastChanged(podcastId);
     } else if (job.name === 'regenerate-clips') {
       const { podcastId } = job.data as RegenerateJobPayload;
       // We can also save the error to the podcast for regeneration failures
       await db.update(podcasts).set({ status: 'failed', errorMessage }).where(eq(podcasts.id, podcastId));
-      await redisPublisher.publish(`podcast_events_${podcastId}`, JSON.stringify({ type: 'REFRESH_CLIPS' }));
+      await notifyPodcastChanged(podcastId);
     } else if (job.name === 'cut-clip') {
       const { clipId } = job.data as CutClipJobPayload;
-      const clip = await db.query.clips.findFirst({ where: eq(clips.id, clipId) });
-      if (clip && clip.podcastId) {
-        // Prevent old failing jobs from overwriting a newly completed job
-        if (clip.status === 'completed') {
-           console.log(`[Worker] Ignoring failure for job ${job.id} because clip ${clipId} is already completed by another job.`);
-        } else {
-           await db.update(clips).set({ status: 'failed', errorMessage }).where(eq(clips.id, clipId));
-        }
-        await redisPublisher.publish(`podcast_events_${clip.podcastId}`, JSON.stringify({ type: 'REFRESH_CLIPS' }));
-      }
+      const [clip] = await db.update(clips).set({ status: 'failed', errorMessage })
+        .where(and(eq(clips.id, clipId), eq(clips.status, 'processing')))
+        .returning({ podcastId: clips.podcastId });
+      if (clip?.podcastId) await notifyPodcastChanged(clip.podcastId);
     }
   } catch (dbErr) {
     console.error(`[Worker] Failed to update database state after job failure:`, dbErr);

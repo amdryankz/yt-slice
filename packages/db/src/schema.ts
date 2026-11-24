@@ -1,16 +1,21 @@
-import { pgTable, text, timestamp, integer, uuid } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { check, pgTable, text, timestamp, integer, uuid } from 'drizzle-orm/pg-core';
+import { contentLanguages } from './content-language';
 
 export const podcasts = pgTable('podcasts', {
   id: uuid('id').primaryKey().defaultRandom(),
   title: text('title').notNull(),
   sourceUrl: text('source_url').notNull(),
+  contentLanguage: text('content_language', { enum: contentLanguages }),
   videoPath: text('video_path'),
   transcript: text('transcript'),
   durationSeconds: integer('duration_seconds'),
   status: text('status').default('processing').notNull(),
   errorMessage: text('error_message'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
-});
+}, (table) => [
+  check('podcasts_content_language_check', sql`${table.contentLanguage} in ('en', 'id')`),
+]);
 
 export const clips = pgTable('clips', {
   id: uuid('id').primaryKey().defaultRandom(),

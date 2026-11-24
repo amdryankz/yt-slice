@@ -4,6 +4,7 @@ import {
   HarmCategory,
   HarmBlockThreshold,
 } from "@google/genai"
+import { contentLanguageLabels, type ContentLanguage } from "@workspace/db/content-language"
 import { z } from "zod"
 
 // Ensure the API key is available
@@ -14,43 +15,53 @@ if (!process.env.GEMINI_API_KEY) {
 // Initialize the Google Gen AI client
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
 
-export const clipSuggestionInputSchema = z.object({
+const clipSuggestionInputSchema = z.object({
   reasoning: z.string().catch(""),
   title: z.string().catch("Judul Klip Menarik"),
-  startTime: z.string().describe("Start time in MM:SS format").catch("00:00"),
-  endTime: z.string().describe("End time in MM:SS format").catch("00:15"),
-  viralityScore: z.number().min(1).max(100).catch(50),
+  startTime: z.string().catch(""),
+  endTime: z.string().catch(""),
+  viralityScore: z.number().int().min(1).max(100).catch(50),
   explanation: z.string().catch(""),
   caption: z.string().catch("#podcast"),
   captionEn: z.string().trim().min(1).nullable().catch(null),
 })
 
-export const clipArraySchema = z
-  .array(clipSuggestionInputSchema)
-  .transform((clips) => {
-    const parseTime = (timeStr: string) => {
-      const parts = timeStr.split(":").map(Number)
-      if (parts.length === 2) return (parts[0] ?? 0) * 60 + (parts[1] ?? 0)
-      if (parts.length === 3) return (parts[0] ?? 0) * 3600 + (parts[1] ?? 0) * 60 + (parts[2] ?? 0)
-      return parseInt(timeStr, 10) || 0
-    }
+const legacyClipArraySchema = z.array(clipSuggestionInputSchema)
+const localizedClipArraySchema = z.array(clipSuggestionInputSchema.extend({
+  title: z.string().trim().catch(""),
+  caption: z.string().trim().min(1),
+}))
 
-    return clips.map((clip) => ({
-      title: clip.title,
-      startTime: parseTime(clip.startTime),
-      endTime: parseTime(clip.endTime),
-      viralityScore: clip.viralityScore,
-      explanation: clip.explanation,
-      caption: clip.caption,
-      captionEn: clip.captionEn,
-    }))
-  })
+function parseTime(timeStr: string) {
+  const time = timeStr.trim()
+  if (!/^\d+(?::[0-5]?\d){0,2}$/.test(time)) return NaN
+  return time.split(":").reduce((seconds, part) => seconds * 60 + Number(part), 0)
+}
 
-export type ClipSuggestion = z.infer<typeof clipArraySchema>[number]
+function parseSuggestions(input: unknown, contentLanguage: ContentLanguage | null, durationSeconds: number) {
+  const schema = contentLanguage ? localizedClipArraySchema : legacyClipArraySchema
+  const fallbackTitle = contentLanguage === "en" ? "Podcast Highlight" : "Judul Klip Menarik"
+
+  const suggestions = schema.parse(input).map((clip) => ({
+    title: contentLanguage && !clip.title ? fallbackTitle : clip.title,
+    startTime: parseTime(clip.startTime),
+    endTime: parseTime(clip.endTime),
+    viralityScore: clip.viralityScore,
+    explanation: clip.explanation,
+    caption: contentLanguage === "en" ? null : clip.caption,
+    captionEn: contentLanguage === "en" ? clip.caption : contentLanguage === "id" ? null : clip.captionEn,
+  })).filter(({ startTime, endTime }) => startTime >= 0 && endTime > startTime && endTime <= durationSeconds).slice(0, 5)
+
+  if (suggestions.length === 0) throw new Error("Gemini returned no clips with a valid time range.")
+  return suggestions
+}
+
+export type ClipSuggestion = ReturnType<typeof parseSuggestions>[number]
 
 export async function analyzeTranscript(
   transcript: string,
   durationSeconds: number,
+  contentLanguage: ContentLanguage | null,
   stricter = false
 ): Promise<ClipSuggestion[]> {
   console.log("[Gemini] Analyzing transcript. Length:", transcript.length)
@@ -58,6 +69,11 @@ export async function analyzeTranscript(
   const durationMin = Math.floor(durationSeconds / 60)
   const durationSec = Math.floor(durationSeconds % 60)
   const durationFormatted = `${durationMin}:${durationSec.toString().padStart(2, "0")}`
+  const languageLabel = contentLanguage ? contentLanguageLabels[contentLanguage] : "Bahasa Indonesia"
+  const outputInstructions = contentLanguage
+    ? `Write the title and caption in ${languageLabel}, even when the transcript uses a different language. Use a hook and relevant ${languageLabel} hashtags. Preserve the facts and omit the full-video footer. Write the explanation in Bahasa Indonesia.`
+    : `Write title, explanation, and caption in Bahasa Indonesia. Include relevant Indonesian hashtags in caption.
+Write captionEn in natural English for an English-speaking audience. Use a hook and relevant English hashtags for the same clip, and preserve the facts. Leave the full-video link out of captionEn.`
 
   const systemPrompt = `
 You are an expert short-form video editor who creates viral clips for TikTok, YouTube Shorts, and Instagram Reels. Identify 5 viral-worthy clips from the provided transcript.
@@ -94,8 +110,7 @@ Every clip MUST start and end cleanly:
 - 1-49: Filler, low energy, or incomplete thought — do not return clips scored below 50
 
 ## Output format
-Write title, explanation, and caption in Bahasa Indonesia. Include relevant Indonesian hashtags in caption.
-Write captionEn in natural English for an English-speaking audience. Use a hook and relevant English hashtags for the same clip, and preserve the facts. Leave the full-video link out of captionEn.
+${outputInstructions}
 
 You MUST format your response as a JSON array of exactly 5 objects.
 
@@ -107,8 +122,7 @@ Each object must match this exact structure:
   "endTime": "03:00",
   "viralityScore": 95,
   "explanation": "Explanation of the context and the opening phrase that grabs attention",
-  "caption": "An Indonesian social caption with relevant hashtags",
-  "captionEn": "An English social caption with relevant hashtags"
+  "caption": "A social caption in ${languageLabel} with relevant hashtags"${contentLanguage ? "" : ',\n  "captionEn": "An English social caption with relevant hashtags"'}
 }
 
 ## Constraints
@@ -129,7 +143,7 @@ Each object must match this exact structure:
         viralityScore: { type: Type.INTEGER },
         explanation: { type: Type.STRING },
         caption: { type: Type.STRING },
-        captionEn: { type: Type.STRING },
+        ...(contentLanguage ? {} : { captionEn: { type: Type.STRING } }),
       },
       required: [
         "reasoning",
@@ -139,7 +153,7 @@ Each object must match this exact structure:
         "viralityScore",
         "explanation",
         "caption",
-        "captionEn",
+        ...(contentLanguage ? [] : ["captionEn"]),
       ],
     },
   }
@@ -194,10 +208,7 @@ Each object must match this exact structure:
       }
 
       // Try to parse and validate within the try block so failures trigger a retry
-      const parsedData = JSON.parse(rawJson)
-      const validatedData = clipArraySchema.parse(parsedData)
-
-      return validatedData.slice(0, 5) // Success, exit and return
+      return parseSuggestions(JSON.parse(rawJson), contentLanguage, durationSeconds)
     } catch (error) {
       console.warn(
         `[Gemini] Attempt ${attempt} failed:`,

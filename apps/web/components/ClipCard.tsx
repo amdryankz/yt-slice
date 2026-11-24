@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Flame, Edit2, Download, Copy, Check, Loader2, Play, MousePointer2, Trash2, ImageIcon, X } from "lucide-react";
 import type { clips } from "@workspace/db/schema";
+import { isClipFormat, type ClipFormat } from "@workspace/jobs/clip-format";
 import toast from "react-hot-toast";
 import { formatCaptionWithUrl, type CaptionLanguage } from "@/lib/caption";
 import {
@@ -32,6 +33,8 @@ type Clip = typeof clips.$inferSelect;
 
 export default function ClipCard({ 
   clip: initialClip, 
+  speakerCropEnabled,
+  contentLanguage,
   sourceUrl,
   index, 
   playerRef, 
@@ -41,6 +44,8 @@ export default function ClipCard({
   onClipUpdated,
 }: { 
   clip: Clip,
+  speakerCropEnabled: boolean,
+  contentLanguage: CaptionLanguage | null,
   sourceUrl?: string,
   index: number, 
   playerRef: any, 
@@ -51,7 +56,7 @@ export default function ClipCard({
 }) {
   const [localClip, setLocalClip] = useState(initialClip);
   const [isCutting, setIsCutting] = useState(false);
-  const [captionLanguage, setCaptionLanguage] = useState<CaptionLanguage>('id');
+  const [legacyCaptionLanguage, setLegacyCaptionLanguage] = useState<CaptionLanguage>('id');
   const [copiedLanguage, setCopiedLanguage] = useState<CaptionLanguage | null>(null);
   const [isGeneratingCaption, setIsGeneratingCaption] = useState(false);
   const [captionError, setCaptionError] = useState(false);
@@ -62,7 +67,7 @@ export default function ClipCard({
     originalCaption: string | null;
   } | null>(null);
   const [confirmCut, setConfirmCut] = useState(false);
-  const [videoFormat, setVideoFormat] = useState<'original' | 'crop' | 'blur'>('original');
+  const [videoFormat, setVideoFormat] = useState<ClipFormat>('original');
   const [editTitle, setEditTitle] = useState(initialClip.title);
   const [editCaption, setEditCaption] = useState('');
   const [watermarkText, setWatermarkText] = useState("");
@@ -74,8 +79,9 @@ export default function ClipCard({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const isEditingClip = editSession?.mode === 'clip';
+  const captionLanguage = contentLanguage ?? legacyCaptionLanguage;
   const selectedCaption = captionLanguage === 'id' ? localClip.caption : localClip.captionEn;
-  const captionText = captionLanguage === 'en' && selectedCaption == null
+  const captionText = contentLanguage === null && captionLanguage === 'en' && selectedCaption == null
     ? null
     : formatCaptionWithUrl(selectedCaption, sourceUrl, captionLanguage);
 
@@ -88,6 +94,7 @@ export default function ClipCard({
   }, [initialClip]);
 
   async function handleCut() {
+    const previousStatus = localClip.status;
     setIsCutting(true);
     setLocalClip((prev) => ({ ...prev, status: 'processing' }));
     
@@ -106,14 +113,17 @@ export default function ClipCard({
         })
       });
       if (!res.ok) {
-        throw new Error('Failed to trigger cut');
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || 'Gagal memproses klip');
       }
       toast.success('Proses pemotongan video dimulai!');
     } catch (err) {
       console.error(err);
-      toast.error('Gagal memproses klip');
-      setLocalClip((prev) => ({ ...prev, status: 'failed' }));
+      toast.error(err instanceof Error ? err.message : 'Gagal memproses klip');
+      setLocalClip((prev) => prev.status === 'processing' ? { ...prev, status: previousStatus } : prev);
       setIsCutting(false);
+    } finally {
+      onClipUpdated?.();
     }
   }
 
@@ -146,7 +156,7 @@ export default function ClipCard({
   }
 
   async function selectCaptionLanguage(language: CaptionLanguage) {
-    setCaptionLanguage(language);
+    setLegacyCaptionLanguage(language);
     if (language !== 'en' || localClip.captionEn != null || isGeneratingCaption) return;
 
     setIsGeneratingCaption(true);
@@ -238,13 +248,14 @@ export default function ClipCard({
         {isEditingClip ? (
           <input 
             type="text" 
+            lang={contentLanguage ?? undefined}
             value={editTitle} 
             disabled={isSaving}
             onChange={(e) => setEditTitle(e.target.value)}
             className="font-bold text-xl text-slate-100 flex-1 bg-slate-900/50 border border-slate-700 rounded-lg px-2 py-1 focus:outline-none focus:border-purple-500 min-w-0"
           />
         ) : (
-          <h3 className="font-bold text-xl text-slate-100 flex-1 break-words min-w-0">{index + 1}. {localClip.title}</h3>
+          <h3 lang={contentLanguage ?? undefined} className="font-bold text-xl text-slate-100 flex-1 break-words min-w-0">{index + 1}. {localClip.title}</h3>
         )}
         <div className="flex flex-col items-end gap-2">
           <div className="flex items-center gap-1.5 bg-gradient-to-r from-rose-500/20 to-orange-500/20 text-rose-400 border border-rose-500/30 px-3 py-1.5 rounded-xl shadow-inner">
@@ -347,7 +358,7 @@ export default function ClipCard({
               </div>
             )}
           </div>
-          <div role="group" aria-label="Caption language" className="mb-3 flex w-fit gap-1 rounded-lg bg-slate-950/60 p-1">
+          {contentLanguage === null && <div role="group" aria-label="Caption language" className="mb-3 flex w-fit gap-1 rounded-lg bg-slate-950/60 p-1">
             {captionLanguages.map(({ code, label }) => (
               <button
                 key={code}
@@ -361,7 +372,7 @@ export default function ClipCard({
                 {label}
               </button>
             ))}
-          </div>
+          </div>}
           {editSession && editSession.originalCaption !== null ? (
             <textarea
               aria-label={`${captionLanguage === 'en' ? 'English' : 'Indonesian'} caption`}
@@ -438,12 +449,15 @@ export default function ClipCard({
             <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Video Format</label>
             <select 
               value={videoFormat} 
-              onChange={(e) => setVideoFormat(e.target.value as any)}
+              onChange={(e) => {
+                if (isClipFormat(e.target.value)) setVideoFormat(e.target.value);
+              }}
               disabled={localClip.status === 'processing' || isCutting}
               className="bg-slate-900 text-slate-200 border border-slate-700 rounded-lg p-2 text-sm focus:outline-none focus:border-purple-500 disabled:opacity-50"
             >
               <option value="original">Original (16:9)</option>
               <option value="crop">Vertical Fill (9:16 Crop)</option>
+              {speakerCropEnabled && <option value="speaker-crop">Vertical Fill (9:16 · Follow Speaker)</option>}
               <option value="blur">Vertical Fit (9:16 Blur Background)</option>
             </select>
           </div>

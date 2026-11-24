@@ -1,4 +1,6 @@
-export type CaptionLanguage = 'id' | 'en';
+import type { ContentLanguage } from '@workspace/db/content-language';
+
+export type CaptionLanguage = ContentLanguage;
 
 export function captionFooter(sourceUrl: string, language: CaptionLanguage) {
   const label = language === 'en' ? 'Watch the full video:' : 'Tonton video selengkapnya:';

@@ -5,7 +5,8 @@
   "private": true,
   "exports": {
     ".": "./src/index.ts",
-    "./schema": "./src/schema.ts"
+    "./schema": "./src/schema.ts",
+    "./content-language": "./src/content-language.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate",

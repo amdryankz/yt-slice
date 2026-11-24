@@ -2,7 +2,11 @@ import fs from "node:fs/promises"
 import { createReadStream } from "node:fs"
 import path from "node:path"
 import { createClient } from "@deepgram/sdk"
+import type { ClipFormat } from "@workspace/jobs/clip-format"
+import ffmpegPath from "ffmpeg-static"
+import { speakerCropFilter, speakerTurns } from "./framing"
 import { getProxyLabel, getProxyUrl } from "./proxy"
+import { analyzeSpeakerCrop } from "./speaker-vision"
 import { formatSubtitleWord } from "./subtitle-text"
 import { getYtDlpCookieArgs } from "./ytdlp"
 
@@ -12,16 +16,40 @@ if (!process.env.DEEPGRAM_API_KEY) {
 
 const deepgram = createClient(process.env.DEEPGRAM_API_KEY)
 
+async function speakerAudio(ffmpeg: string, video: string): Promise<string | undefined> {
+  const probe = Bun.spawn([
+    "ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=index", "-of", "csv=p=0", video,
+  ], { stdout: "pipe", stderr: "pipe" })
+  const [probeCode, stream, probeError] = await Promise.all([
+    probe.exited, new Response(probe.stdout).text(), new Response(probe.stderr).text(),
+  ])
+  if (probeCode !== 0) throw new Error(`Unable to inspect clip audio: ${probeError.trim()}`)
+  if (!stream.trim()) return undefined
+
+  // Start the speech clock at clip time zero, including an audio stream that starts late.
+  const audio = `${video}.wav`
+  const extract = Bun.spawn([
+    ffmpeg, "-v", "error", "-y", "-i", video, "-map", "0:a:0", "-af", "aresample=async=1:first_pts=0",
+    "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", audio,
+  ], { stdout: "ignore", stderr: "pipe" })
+  const [extractCode, extractError] = await Promise.all([extract.exited, new Response(extract.stderr).text()])
+  if (extractCode !== 0) throw new Error(`Unable to extract clip audio: ${extractError.trim()}`)
+  return audio
+}
+
 export async function cutVideoSegment(
   url: string,
   startTime: number,
   endTime: number,
   outputPath: string,
-  format: "original" | "crop" | "blur" = "original",
+  format: ClipFormat = "original",
   watermarkText?: string
-): Promise<void> {
+): Promise<string | undefined> {
+  if (!ffmpegPath) throw new Error("Bundled FFmpeg is unavailable")
   const tempPath = `${outputPath}.tmp.mp4`
   const srtPath = `${outputPath}.tmp.ass`
+  const followSpeaker = format === "speaker-crop"
+  const verticalFill = followSpeaker || format === "crop"
 
   console.log(`[Clipper] Downloading raw segment to ${tempPath}`)
 
@@ -34,6 +62,8 @@ export async function cutVideoSegment(
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const proxy = await getProxyUrl(usedProxyHosts);
     const proxyLabel = getProxyLabel(proxy);
+    const useDefaultClients = attempt <= maxAttempts / 2;
+    const preferredResolution = verticalFill && useDefaultClients ? 2160 : 1080;
     usedProxyHosts.add(proxyLabel.toLowerCase());
     console.log(`[Video Cut] Attempt ${attempt}/${maxAttempts} using proxy: ${proxyLabel}`);
     
@@ -45,28 +75,27 @@ export async function cutVideoSegment(
         ...cookieArgs,
         "--js-runtimes",
         "deno",
-        "--extractor-args",
-        "youtube:player_client=android,web",
+        // Pinned clients can expose only the low-resolution stream. Keep them for retries.
+        ...(useDefaultClients ? [] : ["--extractor-args", "youtube:player_client=android,web"]),
         "--download-sections",
         `*${startTime}-${endTime}`,
         "--force-keyframes-at-cuts",
+        "--merge-output-format",
+        "mp4",
         "-S",
-        "res:1080,ext:mp4:m4a",
+        `res:${preferredResolution},ext:mp4:m4a`,
         "-o",
         tempPath,
         url,
       ],
       {
         stderr: "pipe",
-        stdout: "pipe",
+        stdout: "ignore",
       }
     )
 
     const errorText = await new Response(proc.stderr).text()
     const exitCode = await proc.exited
-
-    // Drain stdout to prevent memory leaks if it gets large
-    await new Response(proc.stdout).text();
 
     if (exitCode === 0) {
       success = true;
@@ -89,22 +118,27 @@ export async function cutVideoSegment(
   }
 
   console.log(`[Clipper] Generating subtitles via Deepgram for the segment...`)
+  let turns: ReturnType<typeof speakerTurns> = []
+  let framingAudio: string | undefined
   try {
-    const audioStream = createReadStream(tempPath)
-    const { result, error } = await deepgram.listen.prerecorded.transcribeFile(
-      audioStream,
-      {
-        model: "nova-3",
-        smart_format: true,
-        language: "multi",
-      }
-    )
+    if (followSpeaker) framingAudio = await speakerAudio(ffmpegPath, tempPath)
+    const speechPath = followSpeaker ? framingAudio : tempPath
+    const options = {
+      model: "nova-3",
+      smart_format: true,
+      language: "multi",
+      ...(followSpeaker ? { diarize_model: "v2" } : {}),
+    }
+    const { result, error } = speechPath
+      ? await deepgram.listen.prerecorded.transcribeFile(createReadStream(speechPath), options)
+      : { result: null, error: null }
 
     if (error) throw error
 
-    const words = result?.results?.channels?.[0]?.alternatives?.[0]?.words
-    if (!words || words.length === 0)
+    const words = result?.results?.channels?.[0]?.alternatives?.[0]?.words ?? []
+    if (words.length === 0 && !followSpeaker)
       throw new Error("No words returned from Deepgram")
+    if (followSpeaker) turns = speakerTurns(words)
 
     function sanitizeText(value: string) {
       return value
@@ -202,7 +236,7 @@ export async function cutVideoSegment(
     const phrases = groupWords(allWords, 20, 5, 0.4)
 
     // Calculate Y position based on format to avoid TikTok UI
-    const posY = format === "crop" || format === "blur" ? 1300 : 1700
+    const posY = format === "original" ? 1700 : 1300
 
     const assHeader = `[Script Info]
 ScriptType: v4.00+
@@ -286,18 +320,20 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     const srtBasename = path.basename(srtPath)
     const outBasename = path.basename(outputPath)
 
-    // Gunakan dynamic import standar ESM
-    const ffmpegModule = await import("ffmpeg-static")
-    const ffmpegPath = ffmpegModule.default || ffmpegModule
+    const speakerFilter = followSpeaker ? await analyzeSpeakerCrop(ffmpegPath, tempPath, turns, {
+      audioPath: framingAudio,
+      durationSeconds: endTime - startTime,
+    }) : undefined
+    const ffmpegArgs = [ffmpegPath, "-y", "-i", tempBasename]
 
-    let ffmpegArgs = [ffmpegPath as string, "-y", "-i", tempBasename]
-
-    if (format === "original") {
+    if (speakerFilter) {
+      ffmpegArgs.push("-map", "0:v:0", "-map", "0:a:0?", "-vf", `${speakerFilter},subtitles=${srtBasename}`)
+    } else if (format === "original") {
       ffmpegArgs.push("-vf", `subtitles=${srtBasename}`)
     } else if (format === "crop") {
       ffmpegArgs.push(
         "-vf",
-        `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,subtitles=${srtBasename}`
+        `${speakerCropFilter()},subtitles=${srtBasename}`
       )
     } else if (format === "blur") {
       ffmpegArgs.push(
@@ -306,25 +342,17 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       )
     }
 
-    // Optimize video for TikTok/Shorts:
-    // - Force 60fps (-r 60) for smoothness
-    // - Force Constant Bitrate (CBR) of 8 Mbps to trick TikTok's algorithm into seeing it as high-quality
-    // - Preset fast for good encoding speed vs compression ratio
     ffmpegArgs.push(
       "-c:v",
       "libx264",
       "-profile:v",
       "high",
-      "-b:v",
-      "8M",
-      "-maxrate",
-      "8M",
-      "-bufsize",
-      "8M",
+      // Preserve detail through the vertical resize and keep the original frame cadence.
+      ...(verticalFill
+        ? ["-crf", "17", "-fps_mode:v", "vfr", "-enc_time_base:v", "1:90000"]
+        : ["-b:v", "8M", "-maxrate", "8M", "-bufsize", "8M", "-r", "60"]),
       "-preset",
-      "fast",
-      "-r",
-      "60",
+      verticalFill ? "medium" : "fast",
       "-pix_fmt",
       "yuv420p",
       "-c:a",
@@ -336,22 +364,23 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       outBasename
     )
 
+    const renderStart = performance.now()
     const ffmpegProc = Bun.spawn(ffmpegArgs, {
       cwd,
-      stdout: "pipe",
+      stdout: "ignore",
       stderr: "pipe",
     })
 
-    const ffmpegExitCode = await ffmpegProc.exited
+    const [ffmpegExitCode, errorText] = await Promise.all([ffmpegProc.exited, new Response(ffmpegProc.stderr).text()])
 
     if (ffmpegExitCode !== 0) {
-      const errorText = await new Response(ffmpegProc.stderr).text()
       throw new Error(
         `ffmpeg format conversion failed with exit code ${ffmpegExitCode}. Error: ${errorText}`
       )
     }
 
-    await new Response(ffmpegProc.stdout).text() // Drain stdout
+    console.log(`[Clipper] Rendered '${format}' in ${Math.round(performance.now() - renderStart)} ms`)
+    return speakerFilter
   } finally {
     console.log(`[Clipper] Cleaning up temporary subtitles...`)
     await fs
@@ -378,7 +407,26 @@ function wrapText(text: string, maxLen: number) {
   return lines.join('\n'); // Write actual newline characters to the file
 }
 
-export async function generateThumbnail(videoPath: string, outputPath: string, title: string, format: "original" | "crop" | "blur" = "original") {
+let thumbnailFFmpeg: Promise<string> | undefined;
+
+function getThumbnailFFmpeg(): Promise<string> {
+  const bundled = ffmpegPath;
+  if (!bundled) return Promise.resolve("ffmpeg");
+
+  return thumbnailFFmpeg ??= (async () => {
+    const proc = Bun.spawn([bundled, "-hide_banner", "-filters"], { stdout: "pipe", stderr: "ignore" });
+    const [exitCode, filters] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
+    return exitCode === 0 && /^\s*[.A-Z]+\s+drawtext\s/m.test(filters) ? bundled : "ffmpeg";
+  })().catch(() => "ffmpeg");
+}
+
+export async function generateThumbnail(
+  videoPath: string,
+  outputPath: string,
+  title: string,
+  format: ClipFormat = "original",
+  speakerFilter?: string,
+) {
   const cwd = path.dirname(videoPath);
   const titlePath = `${outputPath}.title.txt`;
   
@@ -392,14 +440,14 @@ export async function generateThumbnail(videoPath: string, outputPath: string, t
     const wrappedTitle = wrapText(title.toUpperCase(), maxLen);
     await fs.writeFile(titlePath, wrappedTitle, 'utf-8');
 
-    // Use system ffmpeg instead of ffmpeg-static because ffmpeg-static lacks the 'drawtext' filter (no Freetype support)
-    const ffmpegPath = "ffmpeg";
+    const thumbnailBinary = await getThumbnailFFmpeg();
+    const followSpeaker = format === "speaker-crop";
 
     let filterGraph = "";
     
     // Apply the same video format scaling as the main video
-    if (format === "crop") {
-      filterGraph += "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,";
+    if (followSpeaker || format === "crop") {
+      filterGraph += `${speakerFilter ?? speakerCropFilter()},`;
     } else if (format === "blur") {
       filterGraph += "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=20:20[bg];[0:v]scale=1080:1920:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,";
     }
@@ -408,34 +456,23 @@ export async function generateThumbnail(videoPath: string, outputPath: string, t
     filterGraph += "eq=contrast=1.05:saturation=1.3,vignette=PI/4,";
 
     // Add drawtext with thick border (stroke), drop shadow, and line spacing
-    filterGraph += `drawtext=textfile='${titlePath}':fontcolor=yellow:fontsize=${fontSize}:borderw=10:bordercolor=black:shadowx=6:shadowy=6:shadowcolor=black@0.9:line_spacing=20:x=(w-text_w)/2:y=(h-text_h)/2`;
+    filterGraph += `drawtext=textfile='${titlePath}':expansion=none:fontcolor=yellow:fontsize=${fontSize}:borderw=10:bordercolor=black:shadowx=6:shadowy=6:shadowcolor=black@0.9:line_spacing=20:x=(w-text_w)/2:y=(h-text_h)/2`;
 
-    const ffmpegArgs = [
-      ffmpegPath,
-      "-y",
-      "-ss", "00:00:00.500", // Extract at 0.5 seconds
-      "-i", videoPath,
-      "-vframes", "1",
-    ];
-
-    if (format === "blur") {
-      ffmpegArgs.push("-filter_complex", filterGraph);
-    } else {
-      ffmpegArgs.push("-vf", filterGraph);
+    // Output seeking lets the crop see the original timestamp of the thumbnail frame.
+    const seeks = ["0.5", "0"];
+    for (const seek of seeks) {
+      const inputArgs = followSpeaker
+        ? ["-i", videoPath, "-ss", seek, "-map", "0:v:0"]
+        : ["-ss", seek, "-i", videoPath];
+      const proc = Bun.spawn([
+        thumbnailBinary, "-y", ...inputArgs, "-vframes", "1",
+        format === "blur" ? "-filter_complex" : "-vf", filterGraph, "-q:v", "2", outputPath,
+      ], { cwd, stdout: "ignore", stderr: "pipe" });
+      const [exitCode, errorText] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+      if (exitCode === 0 && await fs.stat(outputPath).then((file) => file.size > 0, () => false)) return;
+      if (seek === seeks.at(-1) && exitCode !== 0) throw new Error(`Thumbnail generation failed: ${errorText}`);
     }
-
-    ffmpegArgs.push(
-      "-q:v", "2", // High quality JPEG
-      outputPath
-    );
-
-    const proc = Bun.spawn(ffmpegArgs, { cwd, stdout: "pipe", stderr: "pipe" });
-    const exitCode = await proc.exited;
-
-    if (exitCode !== 0) {
-      const errorText = await new Response(proc.stderr).text();
-      throw new Error(`Thumbnail generation failed: ${errorText}`);
-    }
+    throw new Error("Thumbnail generation produced no frame");
   } finally {
     // Cleanup temporary title file
     await fs.unlink(titlePath).catch(() => {});

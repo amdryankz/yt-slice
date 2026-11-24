@@ -76,6 +76,8 @@ bun run dev
 
 The web application will be available at [http://localhost:3000](http://localhost:3000).
 
+To enable the optional **Vertical Fill (9:16 · Follow Speaker)** export, see the [speaker crop worker setup](docs/speaker-following-crop-plan.md#enable-the-format).
+
 ## 🚀 Deployment
 
 For a detailed step-by-step guide on how to deploy this application to a VPS (Ubuntu) using PM2 and Nginx, please refer to the `vps_deployment_guide.md` file (if available in your documentation artifacts).

@@ -1,0 +1,2 @@
+ALTER TABLE "podcasts" ADD COLUMN "content_language" text;--> statement-breakpoint
+ALTER TABLE "podcasts" ADD CONSTRAINT "podcasts_content_language_check" CHECK ("podcasts"."content_language" in ('en', 'id'));

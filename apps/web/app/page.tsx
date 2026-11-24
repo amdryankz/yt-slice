@@ -3,7 +3,6 @@ import { db, podcasts } from "@workspace/db";
 import { desc } from "drizzle-orm";
 import Link from "next/link";
 import PodcastForm from "../components/PodcastForm";
-import ProxyBandwidthCard from "../components/ProxyBandwidthCard";
 
 export default async function Dashboard() {
   const allPodcasts = await db.query.podcasts.findMany({
@@ -19,7 +18,7 @@ export default async function Dashboard() {
       <main className="z-10 w-full max-w-5xl mt-6 sm:mt-12">
         <div className="text-center mb-8 sm:mb-10">
           <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
-            Clip AI
+            Create clips
           </h1>
           <p className="mt-3 sm:mt-4 text-base sm:text-lg text-slate-400 max-w-xl mx-auto">
             Submit a podcast or video URL to automatically generate viral clips.
@@ -27,8 +26,6 @@ export default async function Dashboard() {
         </div>
 
         <PodcastForm />
-
-        <ProxyBandwidthCard />
 
         <div className="w-full bg-white/5 border border-white/10 backdrop-blur-xl p-5 sm:p-8 rounded-3xl shadow-2xl">
           <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6 text-slate-100">Recent Projects</h2>

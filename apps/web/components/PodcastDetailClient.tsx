@@ -5,6 +5,7 @@ import ReactPlayer from "react-player";
 import Link from "next/link";
 import { ArrowLeft, Trash2, Loader2, RefreshCw } from "lucide-react";
 import toast from "react-hot-toast";
+import type { clips, podcasts } from "@workspace/db/schema";
 import ClipCard from "./ClipCard";
 import {
   AlertDialog,
@@ -18,10 +19,15 @@ import {
   AlertDialogTrigger,
 } from "@workspace/ui/components/alert-dialog";
 
-export default function PodcastDetailClient({ podcast, generatedClips }: { podcast: any, generatedClips: any[] }) {
+export default function PodcastDetailClient({ podcast, generatedClips, speakerCropEnabled }: {
+  podcast: typeof podcasts.$inferSelect;
+  generatedClips: (typeof clips.$inferSelect)[];
+  speakerCropEnabled: boolean;
+}) {
   const playerRef = useRef<any>(null);
   const [playedSeconds, setPlayedSeconds] = useState(0);
   const [localClips, setLocalClips] = useState(generatedClips);
+  const [projectStatus, setProjectStatus] = useState({ status: podcast.status, errorMessage: podcast.errorMessage });
   const [isAdding, setIsAdding] = useState(false);
   const [isDeletingPodcast, setIsDeletingPodcast] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
@@ -40,7 +46,10 @@ export default function PodcastDetailClient({ podcast, generatedClips }: { podca
       const response = await fetch(`/api/podcasts/${podcast.id}/clips`, { signal: request.signal });
       if (!response.ok) throw new Error('Failed to fetch clips');
       const data = await response.json();
-      if (!request.signal.aborted && data.clips) setLocalClips(data.clips);
+      if (!request.signal.aborted) {
+        if (data.clips) setLocalClips(data.clips);
+        if (data.podcast) setProjectStatus(data.podcast);
+      }
     } catch (error) {
       if (!request.signal.aborted) console.error('Failed to refresh clips', error);
     } finally {
@@ -50,6 +59,7 @@ export default function PodcastDetailClient({ podcast, generatedClips }: { podca
 
   useEffect(() => {
     const eventSource = new EventSource(`/api/podcasts/${podcast.id}/events`);
+    eventSource.onopen = () => void refreshClips();
     
     eventSource.onmessage = (event) => {
       if (event.data === 'ping') return;
@@ -64,6 +74,13 @@ export default function PodcastDetailClient({ podcast, generatedClips }: { podca
       activeClipRefresh.current?.abort();
     };
   }, [podcast.id, refreshClips]);
+
+  const hasActiveJob = projectStatus.status === 'processing' || isRegenerating || localClips.some((clip) => clip.status === 'processing');
+  useEffect(() => {
+    if (!hasActiveJob) return;
+    const interval = window.setInterval(() => void refreshClips(), 15_000);
+    return () => window.clearInterval(interval);
+  }, [hasActiveJob, refreshClips]);
 
   function handlePreviewClip(start: number, end: number) {
     if (playerRef.current) {
@@ -109,15 +126,12 @@ export default function PodcastDetailClient({ podcast, generatedClips }: { podca
       }
       
       toast.success('Permintaan berhasil! AI sedang bekerja di latar belakang...', { id: loadingToast });
+      setTimeout(() => setIsRegenerating(false), 30000);
     } catch (error: any) {
       console.error(error);
       toast.error(error.message || 'Gagal memulai regenerasi klip', { id: loadingToast });
       setIsRegenerating(false);
     }
-    // We don't need to manually setIsRegenerating(false) on success 
-    // because the SSE will trigger REFRESH_CLIPS soon, or user can just see it disabled.
-    // But let's enable it after 30 seconds just in case.
-    setTimeout(() => setIsRegenerating(false), 30000);
   }
 
   async function handleAddManualClip() {
@@ -166,13 +180,13 @@ export default function PodcastDetailClient({ podcast, generatedClips }: { podca
           <h1 className="text-4xl font-extrabold text-slate-100 tracking-tight">{podcast.title}</h1>
           <div className="flex items-center gap-3 mt-4">
             <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${
-              podcast.status === 'completed' 
+              projectStatus.status === 'completed'
                 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                : podcast.status === 'processing'
+                : projectStatus.status === 'processing'
                   ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
                   : 'bg-slate-500/10 text-slate-400 border-slate-500/20'
             }`}>
-              {podcast.status.toUpperCase()}
+              {projectStatus.status.toUpperCase()}
             </span>
             <span className="text-slate-400 text-sm font-medium">
               Added on {new Date(podcast.createdAt).toLocaleDateString()}
@@ -226,14 +240,14 @@ export default function PodcastDetailClient({ podcast, generatedClips }: { podca
       </div>
 
       <div className="flex flex-col gap-10">
-        {podcast.status === 'failed' && podcast.errorMessage && (
+        {projectStatus.status === 'failed' && projectStatus.errorMessage && (
           <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex items-start gap-3 shadow-xl">
             <div className="bg-red-500/20 p-2 rounded-lg text-red-400 shrink-0">
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
             </div>
             <div>
               <h4 className="text-red-400 font-bold">Pemrosesan Gagal</h4>
-              <p className="text-red-300 text-sm mt-1">{podcast.errorMessage}</p>
+              <p className="text-red-300 text-sm mt-1">{projectStatus.errorMessage}</p>
             </div>
           </div>
         )}
@@ -316,7 +330,7 @@ export default function PodcastDetailClient({ podcast, generatedClips }: { podca
           
           {localClips.length === 0 ? (
             <div className="bg-white/5 border border-white/10 backdrop-blur-xl rounded-3xl p-12 text-center flex flex-col items-center shadow-xl">
-              {podcast.status === 'processing' ? (
+              {projectStatus.status === 'processing' ? (
                 <>
                   <div className="w-10 h-10 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mb-6" />
                   <p className="text-lg font-medium text-slate-200">AI is currently analyzing the transcript...</p>
@@ -330,6 +344,8 @@ export default function PodcastDetailClient({ podcast, generatedClips }: { podca
             <div className="flex overflow-x-auto snap-x snap-mandatory gap-6 pb-8 pt-4 custom-scrollbar hide-scrollbar w-full px-2 items-start">
               {localClips.map((clip, index) => (
                 <ClipCard 
+                  speakerCropEnabled={speakerCropEnabled}
+                  contentLanguage={podcast.contentLanguage}
                   key={clip.id} 
                   clip={clip} 
                   sourceUrl={podcast.sourceUrl}

@@ -1,3 +1,5 @@
+import type { ClipFormat } from './clip-format';
+
 export * from './queue';
 export * from './pubsub';
 
@@ -8,7 +10,7 @@ export interface VideoJobPayload {
 
 export interface CutClipJobPayload {
   clipId: string;
-  format?: 'original' | 'crop' | 'blur';
+  format?: ClipFormat;
   watermarkText?: string;
 }
 

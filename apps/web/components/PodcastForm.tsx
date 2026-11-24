@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { Loader2, PlusCircle, CheckCircle } from "lucide-react";
 import toast from "react-hot-toast";
+import { contentLanguages, contentLanguageLabels, type ContentLanguage } from "@workspace/db/content-language";
 
 export default function PodcastForm() {
   const [title, setTitle] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
+  const [contentLanguage, setContentLanguage] = useState<ContentLanguage | "">("");
   const [loading, setLoading] = useState(false);
   const [successId, setSuccessId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -21,7 +23,7 @@ export default function PodcastForm() {
       const res = await fetch("/api/podcasts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, sourceUrl }),
+        body: JSON.stringify({ title, sourceUrl, contentLanguage }),
       });
 
       const data = await res.json();
@@ -33,6 +35,7 @@ export default function PodcastForm() {
       toast.success("Podcast successfully added to the processing queue!");
       setTitle("");
       setSourceUrl("");
+      setContentLanguage("");
       
       // Refresh to show new list
       setTimeout(() => {
@@ -78,6 +81,28 @@ export default function PodcastForm() {
             className="bg-slate-900/50 border border-slate-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 rounded-xl px-4 py-3 text-slate-100 placeholder:text-slate-500 transition-all outline-none"
           />
         </div>
+
+        <fieldset className="min-w-0" disabled={loading}>
+          <legend className="mb-2 ml-1 text-sm font-medium text-slate-300">Language</legend>
+          <div className="grid grid-cols-2 gap-1 rounded-xl border border-slate-700 bg-slate-900/50 p-1">
+            {contentLanguages.map((language) => (
+              <label key={language} className="relative">
+                <input
+                  type="radio"
+                  name="contentLanguage"
+                  value={language}
+                  checked={contentLanguage === language}
+                  onChange={() => setContentLanguage(language)}
+                  required
+                  className="peer absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-wait"
+                />
+                <span className="flex min-h-10 items-center justify-center rounded-lg px-2 py-2 text-center text-sm font-medium text-slate-400 transition-colors peer-checked:bg-purple-500/20 peer-checked:text-purple-100 peer-checked:ring-1 peer-checked:ring-inset peer-checked:ring-purple-400/50 peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-purple-400">
+                  {contentLanguageLabels[language]}
+                </span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
 
         {error && (
           <div className="text-red-400 text-sm bg-red-400/10 border border-red-400/20 p-3 rounded-xl">

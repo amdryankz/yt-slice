@@ -4,11 +4,10 @@ import path from "node:path"
 import { createClient } from "@deepgram/sdk"
 import type { ClipFormat } from "@workspace/jobs/clip-format"
 import ffmpegPath from "ffmpeg-static"
+import { downloadVideoSegment } from "./downloader"
 import { speakerCropFilter, speakerTurns } from "./framing"
-import { getProxyLabel, getProxyUrl } from "./proxy"
 import { analyzeSpeakerCrop } from "./speaker-vision"
 import { formatSubtitleWord } from "./subtitle-text"
-import { getYtDlpCookieArgs } from "./ytdlp"
 
 if (!process.env.DEEPGRAM_API_KEY) {
   throw new Error("DEEPGRAM_API_KEY is missing from environment variables.")
@@ -16,16 +15,7 @@ if (!process.env.DEEPGRAM_API_KEY) {
 
 const deepgram = createClient(process.env.DEEPGRAM_API_KEY)
 
-async function speakerAudio(ffmpeg: string, video: string): Promise<string | undefined> {
-  const probe = Bun.spawn([
-    "ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=index", "-of", "csv=p=0", video,
-  ], { stdout: "pipe", stderr: "pipe" })
-  const [probeCode, stream, probeError] = await Promise.all([
-    probe.exited, new Response(probe.stdout).text(), new Response(probe.stderr).text(),
-  ])
-  if (probeCode !== 0) throw new Error(`Unable to inspect clip audio: ${probeError.trim()}`)
-  if (!stream.trim()) return undefined
-
+async function speakerAudio(ffmpeg: string, video: string): Promise<string> {
   // Start the speech clock at clip time zero, including an audio stream that starts late.
   const audio = `${video}.wav`
   const extract = Bun.spawn([
@@ -52,76 +42,13 @@ export async function cutVideoSegment(
   const verticalFill = followSpeaker || format === "crop"
 
   console.log(`[Clipper] Downloading raw segment to ${tempPath}`)
-
-  let lastError = '';
-  let success = false;
-  const cookieArgs = await getYtDlpCookieArgs();
-  const usedProxyHosts = new Set<string>();
-  const maxAttempts = 10;
-  
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const proxy = await getProxyUrl(usedProxyHosts);
-    const proxyLabel = getProxyLabel(proxy);
-    const useDefaultClients = attempt <= maxAttempts / 2;
-    const preferredResolution = verticalFill && useDefaultClients ? 2160 : 1080;
-    usedProxyHosts.add(proxyLabel.toLowerCase());
-    console.log(`[Video Cut] Attempt ${attempt}/${maxAttempts} using proxy: ${proxyLabel}`);
-    
-    const proc = Bun.spawn(
-      [
-        "yt-dlp",
-        "--proxy",
-        proxy,
-        ...cookieArgs,
-        "--js-runtimes",
-        "deno",
-        // Pinned clients can expose only the low-resolution stream. Keep them for retries.
-        ...(useDefaultClients ? [] : ["--extractor-args", "youtube:player_client=android,web"]),
-        "--download-sections",
-        `*${startTime}-${endTime}`,
-        "--force-keyframes-at-cuts",
-        "--merge-output-format",
-        "mp4",
-        "-S",
-        `res:${preferredResolution},ext:mp4:m4a`,
-        "-o",
-        tempPath,
-        url,
-      ],
-      {
-        stderr: "pipe",
-        stdout: "ignore",
-      }
-    )
-
-    const errorText = await new Response(proc.stderr).text()
-    const exitCode = await proc.exited
-
-    if (exitCode === 0) {
-      success = true;
-      break;
-    }
-    
-    lastError = errorText;
-    console.warn(`[Video Cut] Attempt ${attempt} failed.`);
-    
-    // Remove temp path just in case yt-dlp left partial files before retrying
-    await fs.unlink(tempPath).catch(() => {});
-    await fs.unlink(`${tempPath}.part`).catch(() => {});
-    await fs.unlink(`${tempPath}.ytdl`).catch(() => {});
-  }
-
-  if (!success) {
-    throw new Error(
-      `yt-dlp clip cut failed after ${maxAttempts} attempts. Last Error: ${lastError}`
-    )
-  }
+  const { hasAudio } = await downloadVideoSegment(url, startTime, endTime, tempPath, verticalFill)
 
   console.log(`[Clipper] Generating subtitles via Deepgram for the segment...`)
   let turns: ReturnType<typeof speakerTurns> = []
   let framingAudio: string | undefined
   try {
-    if (followSpeaker) framingAudio = await speakerAudio(ffmpegPath, tempPath)
+    if (followSpeaker && hasAudio) framingAudio = await speakerAudio(ffmpegPath, tempPath)
     const speechPath = followSpeaker ? framingAudio : tempPath
     const options = {
       model: "nova-3",
@@ -327,7 +254,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     const ffmpegArgs = [ffmpegPath, "-y", "-i", tempBasename]
 
     if (speakerFilter) {
-      ffmpegArgs.push("-map", "0:v:0", "-map", "0:a:0?", "-vf", `${speakerFilter},subtitles=${srtBasename}`)
+      ffmpegArgs.push("-map", "0:V:0", "-map", "0:a:0?", "-vf", `${speakerFilter},subtitles=${srtBasename}`)
     } else if (format === "original") {
       ffmpegArgs.push("-vf", `subtitles=${srtBasename}`)
     } else if (format === "crop") {
@@ -462,7 +389,7 @@ export async function generateThumbnail(
     const seeks = ["0.5", "0"];
     for (const seek of seeks) {
       const inputArgs = followSpeaker
-        ? ["-i", videoPath, "-ss", seek, "-map", "0:v:0"]
+        ? ["-i", videoPath, "-ss", seek, "-map", "0:V:0"]
         : ["-ss", seek, "-i", videoPath];
       const proc = Bun.spawn([
         thumbnailBinary, "-y", ...inputArgs, "-vframes", "1",

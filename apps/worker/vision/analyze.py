@@ -152,7 +152,7 @@ def sample_frames(ffmpeg, video, square_pixel_filter):
         f"+gte(scene,{SCENE_THRESHOLD})',metadata=mode=print:key=lavfi.scene_score"
     )
     command = [ffmpeg, "-hide_banner", "-nostats", "-nostdin", "-filter_threads", "1", "-threads", "2",
-               "-i", video, "-map", "0:v:0", "-an", "-vf", filters,
+               "-i", video, "-map", "0:V:0", "-an", "-vf", filters,
                "-c:v", "ppm", "-threads:v", "1", "-fps_mode", "passthrough", "-f", "image2pipe", "pipe:1"]
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     samples = SimpleQueue()

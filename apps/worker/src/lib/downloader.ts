@@ -1,11 +1,23 @@
 import { join } from 'path';
 import { unlink } from 'node:fs/promises';
+import type { ClipFormat } from '@workspace/jobs/clip-format';
+import { UnrecoverableError } from 'bullmq';
 import { getProxyLabel, getProxyUrl } from './proxy';
 import { getYtDlpCookieArgs } from './ytdlp';
 
+const followSpeakerAttempts = [
+  { resolution: 1080, httpsOnly: true },
+  { resolution: 1080, httpsOnly: true },
+  { resolution: 1080 },
+  { resolution: 720, httpsOnly: true },
+  { resolution: 720, httpsOnly: true },
+  { resolution: 720 },
+  { resolution: 720, pinnedClients: true },
+];
+
 async function probeVideoSegment(path: string) {
   const proc = Bun.spawn([
-    'ffprobe', '-v', 'error', '-show_entries', 'stream=codec_type:stream_disposition=attached_pic',
+    'ffprobe', '-v', 'error', '-show_entries', 'stream=codec_type,width,height:stream_disposition=attached_pic',
     '-of', 'json', path,
   ], { stdout: 'pipe', stderr: 'pipe' });
   const [exitCode, output, error] = await Promise.all([
@@ -14,12 +26,13 @@ async function probeVideoSegment(path: string) {
   if (exitCode !== 0) throw new Error(`Unable to inspect downloaded clip: ${error.trim()}`);
 
   const { streams = [] } = JSON.parse(output) as {
-    streams?: { codec_type: string; disposition?: { attached_pic?: number } }[];
+    streams?: { codec_type: string; width?: number; height?: number; disposition?: { attached_pic?: number } }[];
   };
-  if (!streams.some((stream) => stream.codec_type === 'video' && !stream.disposition?.attached_pic)) {
+  const video = streams.find((stream) => stream.codec_type === 'video' && !stream.disposition?.attached_pic);
+  if (!video?.width || !video.height) {
     throw new Error('Downloaded clip has no video stream.');
   }
-  return { hasAudio: streams.some((stream) => stream.codec_type === 'audio') };
+  return { width: video.width, height: video.height, hasAudio: streams.some((stream) => stream.codec_type === 'audio') };
 }
 
 export async function downloadVideoSegment(
@@ -27,29 +40,38 @@ export async function downloadVideoSegment(
   startTime: number,
   endTime: number,
   outputPath: string,
-  verticalFill: boolean,
+  format: ClipFormat,
 ) {
   const cookieArgs = await getYtDlpCookieArgs();
   const usedProxyHosts = new Set<string>();
-  const maxAttempts = 10;
+  const followSpeaker = format === 'speaker-crop';
+  const maxAttempts = followSpeaker ? followSpeakerAttempts.length : 10;
   let lastError = '';
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const proxy = await getProxyUrl(usedProxyHosts);
     const proxyLabel = getProxyLabel(proxy);
-    const useDefaultClients = attempt <= maxAttempts / 2;
-    const preferredResolution = verticalFill && useDefaultClients ? 2160 : 1080;
+    const hdAttempt = followSpeaker ? followSpeakerAttempts[attempt - 1] : undefined;
+    const pinnedClients = hdAttempt ? hdAttempt.pinnedClients : attempt > maxAttempts / 2;
+    const preferredResolution = hdAttempt?.resolution ?? (format === 'crop' && !pinnedClients ? 2160 : 1080);
+    const protocol = hdAttempt?.httpsOnly ? '[protocol=https]' : '';
+    const filter = hdAttempt ? `[width>=${hdAttempt.resolution}][height>=${hdAttempt.resolution}]${protocol}` : '';
+    const videoOnly = hdAttempt?.httpsOnly ? '' : `/bv${filter}`;
+    const selection = `bv*${filter}+ba${protocol}/b${filter}${videoOnly}`;
+    const sort = `res:${preferredResolution},ext:mp4:m4a${hdAttempt?.httpsOnly ? ',codec:avc:m4a' : ''}`;
     usedProxyHosts.add(proxyLabel.toLowerCase());
-    console.log(`[Video Cut] Attempt ${attempt}/${maxAttempts} using proxy: ${proxyLabel}`);
+    const target = hdAttempt ? ` for ${hdAttempt.resolution}p${hdAttempt.httpsOnly ? ' over HTTPS' : ''}` : '';
+    console.log(`[Video Cut] Attempt ${attempt}/${maxAttempts}${target} using proxy: ${proxyLabel}`);
 
     const proc = Bun.spawn([
       'yt-dlp', '--proxy', proxy, ...cookieArgs, '--js-runtimes', 'deno',
       // Keep pinned clients for retries when the default clients fail.
-      ...(useDefaultClients ? [] : ['--extractor-args', 'youtube:player_client=android,web']),
+      ...(pinnedClients ? ['--extractor-args', 'youtube:player_client=android,web'] : []),
+      ...(hdAttempt ? ['--no-playlist', '--socket-timeout', '15', '--retries', '1', '--downloader-args', 'ffmpeg_i:-rw_timeout 20000000'] : []),
       '--download-sections', `*${startTime}-${endTime}`,
       '--force-keyframes-at-cuts', '--merge-output-format', 'mp4',
-      '--format', 'bv*+ba/b/bv',
-      '-S', `res:${preferredResolution},ext:mp4:m4a`,
+      '--format', selection,
+      '-S', sort,
       '-o', outputPath, url,
     ], { stdout: 'ignore', stderr: 'pipe' });
 
@@ -57,7 +79,15 @@ export async function downloadVideoSegment(
     if (exitCode === 0) {
       try {
         // The section download can exit successfully even if it kept only the audio.
-        return await probeVideoSegment(outputPath);
+        const source = await probeVideoSegment(outputPath);
+        if (hdAttempt && Math.min(source.width, source.height) < hdAttempt.resolution) {
+          throw new Error(`Downloaded ${source.width}x${source.height}, below the ${hdAttempt.resolution}p target.`);
+        }
+        if (hdAttempt?.httpsOnly && !source.hasAudio) {
+          throw new Error('The direct HD download is missing its audio stream.');
+        }
+        console.info(`[Video Cut] Verified source ${source.width}x${source.height} on attempt ${attempt}.`);
+        return source;
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
         console.warn(`[Video Cut] Attempt ${attempt} rejected: ${lastError}`);
@@ -70,6 +100,9 @@ export async function downloadVideoSegment(
     await Promise.all(['', '.part', '.ytdl'].map((suffix) => unlink(outputPath + suffix).catch(() => {})));
   }
 
+  if (followSpeaker) {
+    throw new UnrecoverableError('Follow Speaker requires a 720p or higher source. The worker could not download an HD stream for this clip.');
+  }
   throw new Error(`Unable to download a video segment after ${maxAttempts} attempts. ${lastError}`);
 }
 

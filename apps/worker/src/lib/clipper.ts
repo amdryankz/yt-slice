@@ -42,7 +42,7 @@ export async function cutVideoSegment(
   const verticalFill = followSpeaker || format === "crop"
 
   console.log(`[Clipper] Downloading raw segment to ${tempPath}`)
-  const { hasAudio } = await downloadVideoSegment(url, startTime, endTime, tempPath, verticalFill)
+  const { hasAudio } = await downloadVideoSegment(url, startTime, endTime, tempPath, format)
 
   console.log(`[Clipper] Generating subtitles via Deepgram for the segment...`)
   let turns: ReturnType<typeof speakerTurns> = []

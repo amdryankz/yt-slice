@@ -10,6 +10,7 @@ export interface VideoJobPayload {
 
 export interface CutClipJobPayload {
   clipId: string;
+  exportAttemptId?: string;
   format?: ClipFormat;
   watermarkText?: string;
 }

@@ -25,8 +25,8 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
-      - name: Test worker
-        run: bun test apps/worker/src
+      - name: Test worker and export summary
+        run: bun test apps/worker/src apps/web/lib/clip-export.test.ts
 
       - name: Setup dummy environment variables
         run: |

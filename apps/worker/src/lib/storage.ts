@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import fs from 'node:fs/promises';
 import { env } from '../env';
 
@@ -25,4 +25,11 @@ export async function uploadFile(filePath: string, destinationKey: string, conte
 
   // Return the public URL
   return `${env.S3_PUBLIC_URL}/${destinationKey}`;
+}
+
+export async function deleteUploadedFile(key: string) {
+  await s3Client.send(new DeleteObjectCommand({ Bucket: env.S3_BUCKET_NAME, Key: key }), {
+    abortSignal: AbortSignal.timeout(5_000),
+  })
+    .catch((error) => console.warn(`[Storage] Could not delete ${key}:`, error));
 }

@@ -6,6 +6,7 @@ import type { clips } from "@workspace/db/schema";
 import { isClipFormat, type ClipFormat } from "@workspace/jobs/clip-format";
 import toast from "react-hot-toast";
 import { formatCaptionWithUrl, type CaptionLanguage } from "@/lib/caption";
+import { exportStageLabels } from "@/lib/clip-export";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -52,8 +53,11 @@ export default function ClipCard({
   playedSeconds: number, 
   onDelete?: (id: string) => void, 
   onPreview?: (start: number, end: number) => void,
-  onClipUpdated?: () => void,
+  onClipUpdated?: () => void | Promise<void>,
 }) {
+  const savedFormat = initialClip.exportFormat;
+  const canUseSavedFormat = isClipFormat(savedFormat) && (savedFormat !== 'speaker-crop' || speakerCropEnabled);
+  const defaultFormat = canUseSavedFormat ? savedFormat : 'original';
   const [localClip, setLocalClip] = useState(initialClip);
   const [isCutting, setIsCutting] = useState(false);
   const [legacyCaptionLanguage, setLegacyCaptionLanguage] = useState<CaptionLanguage>('id');
@@ -67,10 +71,10 @@ export default function ClipCard({
     originalCaption: string | null;
   } | null>(null);
   const [confirmCut, setConfirmCut] = useState(false);
-  const [videoFormat, setVideoFormat] = useState<ClipFormat>('original');
+  const [videoFormat, setVideoFormat] = useState<ClipFormat>(defaultFormat);
   const [editTitle, setEditTitle] = useState(initialClip.title);
   const [editCaption, setEditCaption] = useState('');
-  const [watermarkText, setWatermarkText] = useState("");
+  const [watermarkText, setWatermarkText] = useState(initialClip.exportWatermarkText ?? '');
 
   // Editable timings
   const [editStartTime, setEditStartTime] = useState(initialClip.startTime);
@@ -79,6 +83,9 @@ export default function ClipCard({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const isEditingClip = editSession?.mode === 'clip';
+  const isExporting = localClip.status === 'processing';
+  const canRetry = localClip.status === 'failed' && canUseSavedFormat;
+  const exportStageLabel = localClip.exportStage ? exportStageLabels[localClip.exportStage] : 'Processing export';
   const captionLanguage = contentLanguage ?? legacyCaptionLanguage;
   const selectedCaption = captionLanguage === 'id' ? localClip.caption : localClip.captionEn;
   const captionText = contentLanguage === null && captionLanguage === 'en' && selectedCaption == null
@@ -88,24 +95,26 @@ export default function ClipCard({
   // Sync with parent SSE updates
   useEffect(() => {
     setLocalClip(initialClip);
-    if (initialClip.status === 'completed' || initialClip.status === 'failed') {
-      setIsCutting(false);
-    }
   }, [initialClip]);
 
-  async function handleCut() {
-    const previousStatus = localClip.status;
+  useEffect(() => {
+    setEditStartTime(initialClip.startTime);
+    setEditEndTime(initialClip.endTime);
+    setVideoFormat(defaultFormat);
+    setWatermarkText(initialClip.exportWatermarkText ?? '');
+  }, [initialClip.exportAttemptId, initialClip.startTime, initialClip.endTime, defaultFormat, initialClip.exportWatermarkText]);
+
+  async function handleCut(retry = false) {
     setIsCutting(true);
-    setLocalClip((prev) => ({ ...prev, status: 'processing' }));
+    setConfirmCut(false);
     
     try {
-      // Send the edited start and end times to the API
       const res = await fetch(`/api/clips/${localClip.id}/cut`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
+        body: JSON.stringify(retry ? { retry } : {
           startTime: editStartTime,
           endTime: editEndTime,
           format: videoFormat,
@@ -116,14 +125,16 @@ export default function ClipCard({
         const data = await res.json().catch(() => null);
         throw new Error(data?.error || 'Gagal memproses klip');
       }
-      toast.success('Proses pemotongan video dimulai!');
+      toast.success(retry ? 'Export retry queued.' : 'Export queued.');
     } catch (err) {
       console.error(err);
       toast.error(err instanceof Error ? err.message : 'Gagal memproses klip');
-      setLocalClip((prev) => prev.status === 'processing' ? { ...prev, status: previousStatus } : prev);
-      setIsCutting(false);
     } finally {
-      onClipUpdated?.();
+      try {
+        await onClipUpdated?.();
+      } finally {
+        setIsCutting(false);
+      }
     }
   }
 
@@ -285,10 +296,27 @@ export default function ClipCard({
         </div>
       </div>
 
-      {localClip.status === 'failed' && localClip.errorMessage && (
-        <div className="mt-3 bg-red-500/10 border border-red-500/30 rounded-xl p-3 flex flex-col shadow-inner">
-          <span className="text-red-400 font-bold text-xs uppercase tracking-wider mb-1">Gagal Diproses</span>
-          <span className="text-red-300 text-xs font-medium leading-relaxed">{localClip.errorMessage}</span>
+      {isExporting && (
+        <div role="status" className="mt-3 flex items-center gap-2 text-sm font-medium text-amber-400">
+          <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+          {exportStageLabel}
+        </div>
+      )}
+
+      {localClip.status === 'failed' && (
+        <div className="mt-3 bg-red-500/10 border border-red-500/30 rounded-xl p-3 flex flex-col gap-2 shadow-inner">
+          <span className="text-red-400 font-bold text-xs uppercase tracking-wider">Export failed</span>
+          {localClip.errorMessage && <span className="text-red-300 text-xs font-medium leading-relaxed break-words">{localClip.errorMessage}</span>}
+          {canRetry && (
+            <button
+              type="button"
+              onClick={() => void handleCut(true)}
+              disabled={isCutting || isSaving}
+              className="self-start rounded-lg border border-red-500/30 px-3 py-1.5 text-sm font-semibold text-red-200 hover:bg-red-500/15 disabled:opacity-50"
+            >
+              {isCutting ? 'Queuing…' : 'Retry last export'}
+            </button>
+          )}
         </div>
       )}
       
@@ -408,9 +436,10 @@ export default function ClipCard({
         </div>
       </div>
 
-      {localClip.status === 'completed' && localClip.clipPath ? (
+      {localClip.clipPath && (
         <div className="mt-6 flex flex-col gap-4">
-          <video controls className="w-full rounded-2xl border border-white/10" src={`/api/clips/${localClip.id}/video`} />
+          {localClip.status !== 'completed' && <p className="text-sm font-medium text-slate-300">Last successful export</p>}
+          <video key={localClip.clipPath} controls className="w-full rounded-2xl border border-white/10" src={`/api/clips/${localClip.id}/video`} />
           <div className="flex flex-col sm:flex-row gap-3">
             <a 
               href={`/api/clips/${localClip.id}/video?download=1`} 
@@ -430,7 +459,8 @@ export default function ClipCard({
             )}
           </div>
         </div>
-      ) : (
+      )}
+      {(!localClip.clipPath || localClip.status !== 'completed') && (
         <div className="mt-6 flex flex-col gap-3 mt-auto pt-2">
           
           <div className="bg-white/5 border border-white/10 rounded-xl p-3 flex flex-col gap-2">
@@ -440,7 +470,7 @@ export default function ClipCard({
               placeholder="@MyPodcast"
               value={watermarkText}
               onChange={(e) => setWatermarkText(e.target.value)}
-              disabled={localClip.status === 'processing' || isCutting}
+              disabled={isExporting || isCutting}
               className="bg-slate-900 text-slate-200 border border-slate-700 rounded-lg p-2 text-sm focus:outline-none focus:border-purple-500 disabled:opacity-50"
             />
           </div>
@@ -452,7 +482,7 @@ export default function ClipCard({
               onChange={(e) => {
                 if (isClipFormat(e.target.value)) setVideoFormat(e.target.value);
               }}
-              disabled={localClip.status === 'processing' || isCutting}
+              disabled={isExporting || isCutting}
               className="bg-slate-900 text-slate-200 border border-slate-700 rounded-lg p-2 text-sm focus:outline-none focus:border-purple-500 disabled:opacity-50"
             >
               <option value="original">Original (16:9)</option>
@@ -467,20 +497,17 @@ export default function ClipCard({
               <>
                 <button 
                   onClick={() => setConfirmCut(false)}
-                  disabled={localClip.status === 'processing' || isCutting}
+                  disabled={isExporting || isCutting}
                   className="flex items-center justify-center gap-2 flex-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 py-3 rounded-xl text-sm font-semibold transition-all animate-in fade-in zoom-in duration-200"
                 >
                   <X className="w-4 h-4" /> Batal
                 </button>
                 <button 
-                  onClick={() => {
-                    setConfirmCut(false);
-                    handleCut();
-                  }}
-                  disabled={localClip.status === 'processing' || isCutting}
+                  onClick={() => void handleCut()}
+                  disabled={isExporting || isCutting}
                   className="flex items-center justify-center gap-2 flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white py-3 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-emerald-500/25 animate-in fade-in zoom-in duration-200"
                 >
-                  {localClip.status === 'processing' || isCutting ? (
+                  {isExporting || isCutting ? (
                     <><Loader2 className="w-4 h-4 animate-spin" /> Memproses...</>
                   ) : (
                     <><Check className="w-4 h-4" /> Proses Sekarang</>
@@ -491,7 +518,7 @@ export default function ClipCard({
               <>
                 <button 
                   onClick={() => isEditingClip ? setEditSession(null) : startEditing('clip')}
-                  disabled={localClip.status === 'processing' || isCutting || isSaving || editSession?.mode === 'caption'}
+                  disabled={isExporting || isCutting || isSaving || editSession?.mode === 'caption'}
                   className={`flex items-center justify-center gap-2 flex-1 border py-3 rounded-xl text-sm font-semibold transition-all ${
                     isEditingClip ? "bg-white/20 border-white/30 text-white" : "bg-white/5 border-white/10 hover:bg-white/10 text-slate-200"
                   }`}
@@ -501,13 +528,13 @@ export default function ClipCard({
                 
                 <button 
                   onClick={() => setConfirmCut(true)}
-                  disabled={localClip.status === 'processing' || isCutting}
+                  disabled={isExporting || isCutting}
                   className="flex items-center justify-center gap-2 flex-1 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-purple-500/25"
                 >
-                  {localClip.status === 'processing' || isCutting ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" /> Memproses...</>
+                  {isExporting || isCutting ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> {isExporting ? 'Exporting…' : 'Queuing…'}</>
                   ) : (
-                    <><Download className="w-4 h-4" /> Cut Video</>
+                    <><Download className="w-4 h-4" /> {canRetry ? 'Export with changes' : 'Cut Video'}</>
                   )}
                 </button>
               </>

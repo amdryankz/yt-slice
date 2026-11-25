@@ -36,6 +36,13 @@
       "when": 1795490874659,
       "tag": "0004_project_content_language",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795580382892,
+      "tag": "0005_clip_export_recovery",
+      "breakpoints": true
     }
   ]
 }

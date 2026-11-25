@@ -4,42 +4,29 @@ import { db, podcasts, clips } from '@workspace/db';
 import { eq } from 'drizzle-orm';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { deleteClipFiles } from '@/lib/storage';
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
 
-    const podcast = await db.query.podcasts.findFirst({
-      where: eq(podcasts.id, id),
+    const deleted = await db.transaction(async (tx) => {
+      const [podcast] = await tx.select({ videoPath: podcasts.videoPath }).from(podcasts)
+        .where(eq(podcasts.id, id)).for('update');
+      if (!podcast) return null;
+
+      const clipFiles = await tx.select({ clipPath: clips.clipPath, thumbnailPath: clips.thumbnailPath })
+        .from(clips).where(eq(clips.podcastId, id)).for('update');
+      await tx.delete(podcasts).where(eq(podcasts.id, id));
+      return { podcast, clipFiles };
     });
 
-    if (!podcast) {
+    if (!deleted) {
       return NextResponse.json({ error: 'Podcast not found' }, { status: 404 });
     }
 
-    // Fetch all associated clips to delete their physical files
-    const associatedClips = await db.query.clips.findMany({
-      where: eq(clips.podcastId, id),
-    });
-
-    // Delete clip files
-    for (const clip of associatedClips) {
-      if (clip.clipPath) {
-        if (clip.clipPath.startsWith('http')) {
-          const { deleteFile } = await import('../../../../lib/storage');
-          await deleteFile(clip.clipPath);
-        } else {
-          const filePath = path.join(process.cwd(), "public", clip.clipPath);
-          try {
-            await fs.unlink(filePath);
-          } catch (err: any) {
-            if (err.code !== 'ENOENT') {
-              console.error(`Failed to delete file ${filePath}:`, err);
-            }
-          }
-        }
-      }
-    }
+    const { podcast, clipFiles } = deleted;
+    for (const clip of clipFiles) await deleteClipFiles(clip);
 
     // Optionally delete the source video file if we store it locally (if videoPath exists)
     if (podcast.videoPath) {
@@ -52,9 +39,6 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
         }
       }
     }
-
-    // Delete podcast from db (will cascade delete clips in db)
-    await db.delete(podcasts).where(eq(podcasts.id, id));
 
     return NextResponse.json({ success: true, message: 'Podcast deleted' }, { status: 200 });
   } catch (error) {

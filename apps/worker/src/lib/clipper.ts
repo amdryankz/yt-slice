@@ -33,7 +33,8 @@ export async function cutVideoSegment(
   endTime: number,
   outputPath: string,
   format: ClipFormat = "original",
-  watermarkText?: string
+  watermarkText?: string,
+  onExportStage?: (stage: "transcribing" | "rendering") => Promise<void>
 ): Promise<string | undefined> {
   if (!ffmpegPath) throw new Error("Bundled FFmpeg is unavailable")
   const tempPath = `${outputPath}.tmp.mp4`
@@ -44,6 +45,7 @@ export async function cutVideoSegment(
   console.log(`[Clipper] Downloading raw segment to ${tempPath}`)
   const { hasAudio } = await downloadVideoSegment(url, startTime, endTime, tempPath, format)
 
+  await onExportStage?.("transcribing")
   console.log(`[Clipper] Generating subtitles via Deepgram for the segment...`)
   let turns: ReturnType<typeof speakerTurns> = []
   let framingAudio: string | undefined
@@ -237,6 +239,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     throw new Error(`Subtitle generation failed: ${error.message || error}`)
   }
 
+  await onExportStage?.("rendering")
   console.log(
     `[Clipper] Applying format '${format}' and burning subtitles via ffmpeg to ${outputPath}`
   )

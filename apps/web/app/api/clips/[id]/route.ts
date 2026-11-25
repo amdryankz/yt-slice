@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from 'next/server';
 import { db, clips } from '@workspace/db';
 import { eq } from 'drizzle-orm';
+import { deleteClipFiles } from '@/lib/storage';
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -22,39 +23,18 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   }
 }
 
-import fs from 'node:fs/promises';
-import path from 'node:path';
-
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
 
-    const clip = await db.query.clips.findFirst({
-      where: eq(clips.id, id),
-    });
+    const [clip] = await db.delete(clips).where(eq(clips.id, id))
+      .returning({ clipPath: clips.clipPath, thumbnailPath: clips.thumbnailPath });
 
     if (!clip) {
       return NextResponse.json({ error: 'Clip not found' }, { status: 404 });
     }
 
-    // Physically delete the mp4 file if it exists
-    if (clip.clipPath) {
-      if (clip.clipPath.startsWith('http')) {
-        const { deleteFile } = await import('../../../../lib/storage');
-        await deleteFile(clip.clipPath);
-      } else {
-        const filePath = path.join(process.cwd(), "public", clip.clipPath);
-        try {
-          await fs.unlink(filePath);
-        } catch (err: any) {
-          if (err.code !== 'ENOENT') {
-            console.error(`Failed to delete file ${filePath}:`, err);
-          }
-        }
-      }
-    }
-
-    await db.delete(clips).where(eq(clips.id, id));
+    await deleteClipFiles(clip);
 
     return NextResponse.json({ success: true, message: 'Clip deleted' }, { status: 200 });
   } catch (error) {

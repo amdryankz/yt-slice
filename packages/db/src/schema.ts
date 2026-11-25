@@ -31,6 +31,10 @@ export const clips = pgTable('clips', {
   caption: text('caption'),
   captionEn: text('caption_en'),
   status: text('status').default('draft').notNull(),
+  exportStage: text('export_stage', { enum: ['queued', 'downloading', 'transcribing', 'rendering', 'uploading', 'retrying'] }),
+  exportFormat: text('export_format'),
+  exportWatermarkText: text('export_watermark_text'),
+  exportAttemptId: uuid('export_attempt_id'),
   errorMessage: text('error_message'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });

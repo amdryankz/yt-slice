@@ -6,6 +6,7 @@ import Link from "next/link";
 import { ArrowLeft, Trash2, Loader2, RefreshCw } from "lucide-react";
 import toast from "react-hot-toast";
 import type { clips, podcasts } from "@workspace/db/schema";
+import { summarizeClipExports } from "@/lib/clip-export";
 import ClipCard from "./ClipCard";
 import {
   AlertDialog,
@@ -35,31 +36,46 @@ export default function PodcastDetailClient({ podcast, generatedClips, speakerCr
   const [previewEndTime, setPreviewEndTime] = useState<number | null>(null);
   const [showDeletePodcastConfirm, setShowDeletePodcastConfirm] = useState(false);
   const [showRegenerateConfirm, setShowRegenerateConfirm] = useState(false);
+  const [eventsConnected, setEventsConnected] = useState(false);
+  const [refreshFailed, setRefreshFailed] = useState(false);
   const activeClipRefresh = useRef<AbortController | null>(null);
 
   const refreshClips = useCallback(async () => {
     activeClipRefresh.current?.abort();
     const request = new AbortController();
     activeClipRefresh.current = request;
+    const timeout = window.setTimeout(() => {
+      request.abort();
+      if (activeClipRefresh.current === request) setRefreshFailed(true);
+    }, 10_000);
 
     try {
       const response = await fetch(`/api/podcasts/${podcast.id}/clips`, { signal: request.signal });
       if (!response.ok) throw new Error('Failed to fetch clips');
       const data = await response.json();
       if (!request.signal.aborted) {
+        setRefreshFailed(false);
         if (data.clips) setLocalClips(data.clips);
         if (data.podcast) setProjectStatus(data.podcast);
       }
     } catch (error) {
-      if (!request.signal.aborted) console.error('Failed to refresh clips', error);
+      if (!request.signal.aborted) {
+        setRefreshFailed(true);
+        console.error('Failed to refresh clips', error);
+      }
     } finally {
+      window.clearTimeout(timeout);
       if (activeClipRefresh.current === request) activeClipRefresh.current = null;
     }
   }, [podcast.id]);
 
   useEffect(() => {
     const eventSource = new EventSource(`/api/podcasts/${podcast.id}/events`);
-    eventSource.onopen = () => void refreshClips();
+    eventSource.onopen = () => {
+      setEventsConnected(true);
+      void refreshClips();
+    };
+    eventSource.onerror = () => setEventsConnected(false);
     
     eventSource.onmessage = (event) => {
       if (event.data === 'ping') return;
@@ -72,15 +88,18 @@ export default function PodcastDetailClient({ podcast, generatedClips, speakerCr
     return () => {
       eventSource.close();
       activeClipRefresh.current?.abort();
+      activeClipRefresh.current = null;
     };
   }, [podcast.id, refreshClips]);
 
-  const hasActiveJob = projectStatus.status === 'processing' || isRegenerating || localClips.some((clip) => clip.status === 'processing');
+  const exportSummary = summarizeClipExports(localClips);
+  const hasActiveJob = projectStatus.status === 'processing' || isRegenerating || exportSummary.active > 0;
+  const shouldPoll = hasActiveJob || !eventsConnected || refreshFailed;
   useEffect(() => {
-    if (!hasActiveJob) return;
+    if (!shouldPoll) return;
     const interval = window.setInterval(() => void refreshClips(), 15_000);
     return () => window.clearInterval(interval);
-  }, [hasActiveJob, refreshClips]);
+  }, [shouldPoll, refreshClips]);
 
   function handlePreviewClip(start: number, end: number) {
     if (playerRef.current) {
@@ -164,11 +183,6 @@ export default function PodcastDetailClient({ podcast, generatedClips, speakerCr
       setIsAdding(false);
     }
   }
-  const totalProcessing = localClips.filter(c => c.status === 'processing').length;
-  const totalCompleted = localClips.filter(c => c.status === 'completed').length;
-  const totalClips = localClips.length;
-  const progressPercentage = totalClips > 0 ? (totalCompleted / totalClips) * 100 : 0;
-
   return (
     <main className="max-w-7xl mx-auto relative z-10 pt-8">
       <Link href="/" className="inline-flex items-center gap-2 text-slate-400 hover:text-slate-100 transition-colors mb-6 font-medium">
@@ -206,7 +220,7 @@ export default function PodcastDetailClient({ podcast, generatedClips, speakerCr
               <AlertDialogHeader>
                 <AlertDialogTitle className="text-white">Regenerate Klip?</AlertDialogTitle>
                 <AlertDialogDescription className="text-slate-400">
-                  Ide klip yang berstatus draft/failed akan dihapus dan diganti dengan ide klip baru dari AI. Lanjutkan?
+                  Ide klip yang masih berstatus draft akan diganti dengan ide klip baru dari AI. Lanjutkan?
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -252,35 +266,30 @@ export default function PodcastDetailClient({ podcast, generatedClips, speakerCr
           </div>
         )}
 
-        {/* Queue Status Board */}
         <div className="bg-slate-900/50 backdrop-blur-xl border border-white/10 rounded-2xl p-6 shadow-xl">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <h3 className="text-lg font-bold text-slate-200">Render Queue Status</h3>
-            {totalProcessing > 0 ? (
-              <span className="text-sm font-semibold text-amber-400 animate-pulse bg-amber-400/10 px-3 py-1 rounded-full border border-amber-400/20">
-                Processing {totalProcessing} clips...
-              </span>
-            ) : totalProcessing === 0 && totalCompleted > 0 ? (
-              <span className="text-sm font-semibold text-emerald-400 bg-emerald-400/10 px-3 py-1 rounded-full border border-emerald-400/20">
-                All requested clips rendered successfully!
-              </span>
-            ) : (
-              <span className="text-sm font-medium text-slate-500">
-                Ready to render clips
-              </span>
-            )}
+            <div className="flex flex-wrap items-center gap-3 text-sm font-medium" aria-live="polite">
+              {exportSummary.requested === 0 && <span className="text-slate-400">Ready to render clips</span>}
+              {exportSummary.active > 0 && <span className="text-amber-400">{exportSummary.active} in progress</span>}
+              {exportSummary.failed > 0 && <span className="text-red-400">{exportSummary.failed} failed</span>}
+              {exportSummary.requested > 0 && <span className="text-slate-300">{exportSummary.completed} of {exportSummary.requested} rendered</span>}
+            </div>
           </div>
-          
-          <div className="w-full bg-slate-800 rounded-full h-2">
-            <div 
-              className="bg-gradient-to-r from-purple-500 to-blue-500 h-2 rounded-full transition-all duration-500 shadow-lg shadow-purple-500/50"
-              style={{ width: `${progressPercentage}%` }}
-            />
-          </div>
-          <div className="flex justify-between items-center mt-3 text-xs font-medium text-slate-400">
-            <span>{Math.round(progressPercentage)}% Complete</span>
-            <span>{totalCompleted} / {totalClips} Rendered</span>
-          </div>
+          {exportSummary.requested > 0 && (
+            <div
+              className="w-full bg-slate-800 rounded-full h-2"
+              role="progressbar"
+              aria-label="Requested clips rendered"
+              aria-valuenow={exportSummary.renderedPercent}
+              aria-valuetext={`${exportSummary.completed} of ${exportSummary.requested} rendered`}
+            >
+              <div
+                className="bg-gradient-to-r from-purple-500 to-blue-500 h-2 rounded-full transition-all duration-500 shadow-lg shadow-purple-500/50"
+                style={{ width: `${exportSummary.renderedPercent}%` }}
+              />
+            </div>
+          )}
         </div>
 
         {/* Video Source (Top) */}

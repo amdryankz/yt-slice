@@ -5,6 +5,8 @@ import { UnrecoverableError } from 'bullmq';
 import { getProxyLabel, getProxyUrl } from './proxy';
 import { getYtDlpCookieArgs } from './ytdlp';
 
+export const followSpeakerSourceError = 'Follow Speaker requires a 720p or higher source. The worker could not download an HD stream for this clip.';
+
 const followSpeakerAttempts = [
   { resolution: 1080, httpsOnly: true },
   { resolution: 1080, httpsOnly: true },
@@ -101,7 +103,7 @@ export async function downloadVideoSegment(
   }
 
   if (followSpeaker) {
-    throw new UnrecoverableError('Follow Speaker requires a 720p or higher source. The worker could not download an HD stream for this clip.');
+    throw new UnrecoverableError(followSpeakerSourceError);
   }
   throw new Error(`Unable to download a video segment after ${maxAttempts} attempts. ${lastError}`);
 }

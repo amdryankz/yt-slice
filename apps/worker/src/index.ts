@@ -1,15 +1,16 @@
 import './env';
+import { randomUUID } from 'node:crypto';
 import fs from 'fs/promises';
 import path, { join } from 'path';
 import { Worker, Job } from 'bullmq';
-import { connection, videoQueue, redisPublisher, type AnyJobPayload, type VideoJobPayload, type CutClipJobPayload, type RegenerateJobPayload } from '@workspace/jobs';
+import { connection, videoQueue, notifyPodcastChanged, type AnyJobPayload, type VideoJobPayload, type CutClipJobPayload, type RegenerateJobPayload } from '@workspace/jobs';
 import { db, podcasts, clips } from '@workspace/db';
-import { eq, lt, or, and, ne } from 'drizzle-orm';
-import { downloadAudio, getAudioDuration } from './lib/downloader';
+import { eq, lt, isNull, isNotNull, and, ne } from 'drizzle-orm';
+import { downloadAudio, followSpeakerSourceError, getAudioDuration } from './lib/downloader';
 import { transcribeAudio } from './lib/transcriber';
 import { analyzeTranscript, type ClipSuggestion } from './lib/gemini';
 import { cutVideoSegment, generateThumbnail } from './lib/clipper';
-import { uploadFile } from './lib/storage';
+import { deleteUploadedFile, uploadFile } from './lib/storage';
 
 if (!process.env.DEEPGRAM_API_KEY) {
   console.warn('WARNING: DEEPGRAM_API_KEY is missing from environment variables.');
@@ -42,7 +43,7 @@ async function saveClipSuggestions(
     if (replaceDrafts) {
       await tx.delete(clips).where(and(
         eq(clips.podcastId, podcast.id),
-        or(eq(clips.status, 'draft'), eq(clips.status, 'failed')),
+        eq(clips.status, 'draft'),
       ));
     }
     await tx.insert(clips).values(rows);
@@ -50,9 +51,25 @@ async function saveClipSuggestions(
   });
 }
 
-async function notifyPodcastChanged(podcastId: string) {
-  await redisPublisher.publish(`podcast_events_${podcastId}`, JSON.stringify({ type: 'REFRESH_CLIPS' }))
-    .catch((error) => console.warn(`Could not notify clients for podcast ${podcastId}:`, error));
+function activeExport({ clipId, exportAttemptId }: CutClipJobPayload) {
+  return and(
+    eq(clips.id, clipId),
+    eq(clips.status, 'processing'),
+    exportAttemptId ? eq(clips.exportAttemptId, exportAttemptId) : isNull(clips.exportAttemptId),
+  );
+}
+
+function exportFailureMessage(reason?: string) {
+  return reason === followSpeakerSourceError
+    ? followSpeakerSourceError
+    : 'The export could not be completed. Try exporting again.';
+}
+
+async function updateActiveExport(exportRequest: CutClipJobPayload, values: Partial<typeof clips.$inferInsert>) {
+  const [updated] = await db.update(clips).set(values).where(activeExport(exportRequest))
+    .returning({ podcastId: clips.podcastId });
+  if (updated?.podcastId) void notifyPodcastChanged(updated.podcastId);
+  return updated;
 }
 
 const worker = new Worker(
@@ -135,15 +152,19 @@ const worker = new Worker(
       return { success: true, suggestionsCount: suggestions.length };
       
     } else if (job.name === 'cut-clip') {
-      const { clipId, format, watermarkText } = job.data as CutClipJobPayload;
+      const exportRequest = job.data as CutClipJobPayload;
+      const { clipId, exportAttemptId, format = 'original', watermarkText } = exportRequest;
       
       console.log(`[Job ${job.id}] Cutting clip ${clipId}`);
       let workDir: string | undefined;
+      let uploadedKeys: string[] = [];
       
       try {
         // Wait for the cut request to commit its timings after enqueueing.
         const [clip] = await db.select().from(clips).where(eq(clips.id, clipId)).for('update');
-        if (!clip || clip.status !== 'processing') return { skipped: true };
+        if (!clip || clip.status !== 'processing' || clip.exportAttemptId !== (exportAttemptId ?? null)) {
+          return { skipped: true };
+        }
         
         const podcast = await db.query.podcasts.findFirst({
           where: eq(podcasts.id, clip.podcastId!),
@@ -152,38 +173,57 @@ const worker = new Worker(
         if (!podcast) {
           throw new Error(`Podcast ${clip.podcastId} not found for clip ${clipId}.`);
         }
-        
+
         const tmpDir = '/tmp/clip-ai';
         await fs.mkdir(tmpDir, { recursive: true });
         workDir = await fs.mkdtemp(path.join(tmpDir, 'cut-'));
-        const fileName = `clip-${clip.id}.mp4`;
+        const outputKey = `clip-${clip.id}-${randomUUID()}`;
+        const fileName = `${outputKey}.mp4`;
         const outputPath = path.join(workDir, fileName);
         
         console.log(`[Job ${job.id}] Downloading and formatting video segment to ${outputPath}...`);
-        
-        const speakerFilter = await cutVideoSegment(podcast.sourceUrl, clip.startTime, clip.endTime, outputPath, format, watermarkText);
+        const started = await updateActiveExport(exportRequest, {
+          exportStage: 'downloading', exportFormat: format, exportWatermarkText: watermarkText ?? null,
+        });
+        if (!started) return { skipped: true };
+        const speakerFilter = await cutVideoSegment(podcast.sourceUrl, clip.startTime, clip.endTime, outputPath, format, watermarkText, async (exportStage) => {
+          await updateActiveExport(exportRequest, { exportStage });
+        });
         
         console.log(`[Job ${job.id}] Cut successful! Generating thumbnail...`);
         const thumbnailPath = `${outputPath}.thumb.jpg`;
-        const thumbFileName = `clip-${clip.id}-thumb.jpg`;
+        const thumbFileName = `${outputKey}-thumb.jpg`;
         // Pass the raw video (.tmp.mp4) before subtitles are added, and pass the format
         await generateThumbnail(`${outputPath}.tmp.mp4`, thumbnailPath, clip.title, format, speakerFilter);
         
         console.log(`[Job ${job.id}] Uploading to S3...`);
-        
+        const uploading = await updateActiveExport(exportRequest, { exportStage: 'uploading' });
+        if (!uploading) return { skipped: true };
+        uploadedKeys.push(fileName);
         const publicUrl = await uploadFile(outputPath, fileName);
+        uploadedKeys.push(thumbFileName);
         const thumbPublicUrl = await uploadFile(thumbnailPath, thumbFileName, 'image/jpeg');
         console.log(`[Job ${job.id}] Upload successful: ${publicUrl}`);
         
-        await db
-          .update(clips)
-          .set({ status: 'completed', errorMessage: null, clipPath: publicUrl, thumbnailPath: thumbPublicUrl })
-          .where(eq(clips.id, clipId));
-          
-        await notifyPodcastChanged(podcast.id);
+        // A database connection loss can hide a successful commit. Preserve the files in that case.
+        uploadedKeys = [];
+        const completed = await updateActiveExport(exportRequest, {
+          status: 'completed', exportStage: null, errorMessage: null, clipPath: publicUrl, thumbnailPath: thumbPublicUrl,
+        });
+        if (!completed) {
+          uploadedKeys = [fileName, thumbFileName];
+          return { skipped: true };
+        }
+
+        const replacedKeys = [clip.clipPath, clip.thumbnailPath].flatMap((url) => {
+          const key = url?.startsWith('http') ? url.split('/').at(-1) : undefined;
+          return key ? [key] : [];
+        });
+        await Promise.all(replacedKeys.map(deleteUploadedFile));
           
         return { success: true, clipPath: publicUrl, thumbnailPath: thumbPublicUrl };
       } finally {
+        await Promise.all(uploadedKeys.map(deleteUploadedFile));
         if (workDir) {
           await fs.rm(workDir, { recursive: true, force: true }).catch((error) => {
             console.warn(`[Job ${job.id}] Failed to clean up ${workDir}:`, error);
@@ -208,14 +248,14 @@ const worker = new Worker(
           }
         }
         
-        // DB Cleanup for failed/draft clips older than 7 days
+        // Remove old suggestions while keeping failed exports available to retry.
         const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
         const sevenDaysAgo = new Date(now - SEVEN_DAYS);
         
         const deletedClips = await db.delete(clips).where(
           and(
             lt(clips.createdAt, sevenDaysAgo),
-            or(eq(clips.status, 'failed'), eq(clips.status, 'draft'))
+            eq(clips.status, 'draft')
           )
         ).returning();
         
@@ -248,6 +288,32 @@ async function scheduleCleanup() {
 }
 scheduleCleanup().catch(console.error);
 
+let checkingExports = false;
+async function recoverFinishedExports() {
+  if (checkingExports) return;
+  checkingExports = true;
+  try {
+    const active = await db.select({ clipId: clips.id, exportAttemptId: clips.exportAttemptId })
+      .from(clips).where(and(eq(clips.status, 'processing'), isNotNull(clips.exportAttemptId)));
+    for (const { clipId, exportAttemptId } of active) {
+      if (!exportAttemptId) continue;
+      const state = await videoQueue.getJobState(exportAttemptId);
+      if (state !== 'failed' && state !== 'completed' && state !== 'unknown') continue;
+      const reason = state === 'failed' ? (await videoQueue.getJob(exportAttemptId))?.failedReason : undefined;
+      await updateActiveExport({ clipId, exportAttemptId }, {
+        status: 'failed', exportStage: null, errorMessage: exportFailureMessage(reason),
+      });
+    }
+  } catch (error) {
+    console.error('[Worker] Could not reconcile export status:', error);
+  } finally {
+    checkingExports = false;
+  }
+}
+
+const exportRecoveryTimer = setInterval(() => void recoverFinishedExports(), 30_000);
+void recoverFinishedExports();
+
 worker.on('completed', (job) => {
   console.log(`[Worker] Job ${job.id} has completed successfully!`);
 });
@@ -255,7 +321,7 @@ worker.on('completed', (job) => {
 worker.on('failed', async (job, err) => {
   console.error(`[Worker] Job ${job?.id} (${job?.name}) has failed with error: ${err.message}`);
   
-  if (!job?.finishedOn) return;
+  if (!job || (!job.finishedOn && job.name !== 'cut-clip')) return;
 
   const errorMessage = err.message || 'Unknown error occurred';
 
@@ -271,11 +337,15 @@ worker.on('failed', async (job, err) => {
       await db.update(podcasts).set({ status: 'failed', errorMessage }).where(eq(podcasts.id, podcastId));
       await notifyPodcastChanged(podcastId);
     } else if (job.name === 'cut-clip') {
-      const { clipId } = job.data as CutClipJobPayload;
-      const [clip] = await db.update(clips).set({ status: 'failed', errorMessage })
-        .where(and(eq(clips.id, clipId), eq(clips.status, 'processing')))
-        .returning({ podcastId: clips.podcastId });
-      if (clip?.podcastId) await notifyPodcastChanged(clip.podcastId);
+      const exportRequest = job.data as CutClipJobPayload;
+      const { format = 'original', watermarkText } = exportRequest;
+      await updateActiveExport(exportRequest, job.finishedOn ? {
+        status: 'failed',
+        errorMessage: exportFailureMessage(errorMessage),
+        exportStage: null,
+        exportFormat: format,
+        exportWatermarkText: watermarkText ?? null,
+      } : { exportStage: 'retrying' });
     }
   } catch (dbErr) {
     console.error(`[Worker] Failed to update database state after job failure:`, dbErr);
@@ -284,6 +354,7 @@ worker.on('failed', async (job, err) => {
 
 process.on('SIGINT', async () => {
   console.log('Shutting down worker...');
+  clearInterval(exportRecoveryTimer);
   await worker.close();
   process.exit(0);
 });
